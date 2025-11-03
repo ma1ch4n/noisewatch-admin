@@ -7,27 +7,46 @@ dotenv.config();
 
 const app = express();
 
+// Better logging
+console.log('🔄 Connecting to MongoDB...');
 mongoose.connect(process.env.MONGO_URI, {
     useNewUrlParser: true,
     useUnifiedTopology: true,
 });
 
 const db = mongoose.connection;
-db.on('error', (error) => console.log(error));
-db.once('open', () => console.log('Database Connected'));
+db.on('error', (error) => console.error('❌ MongoDB connection error:', error));
+db.once('open', () => console.log('✅ Database Connected'));
 
 app.use(cors());
 app.use(express.json());
 
-app.get('/', (req, res) => {
-  res.send('API is running');
+// Add a test endpoint
+app.get('/api/test', (req, res) => {
+  res.json({ 
+    message: 'Server is running!', 
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV || 'development'
+  });
 });
 
-app.use('/auth', require('./routes/auth')); // Authentication routes
+app.get('/', (req, res) => {
+  res.json({ 
+    message: 'API is running',
+    endpoints: {
+      auth: '/auth',
+      users: '/user', 
+      reports: '/reports'
+    }
+  });
+});
 
-app.use('/user', require('./routes/user')); // User routes
-app.use('/reports', require('./routes/reportRoute')); // Noise report routes
+app.use('/auth', require('./routes/auth'));
+app.use('/user', require('./routes/user'));
+app.use('/reports', require('./routes/reportRoute'));
 
-
-
-app.listen(5000, () => console.log('Server is running'));
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => {
+  console.log(`🚀 Server running on http://localhost:${PORT}`);
+  console.log(`📡 Environment: ${process.env.NODE_ENV || 'development'}`);
+});

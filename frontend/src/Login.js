@@ -2,7 +2,9 @@ import React, { useState, useRef } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import './Login.css';
-import API_BASE_URL from './utils/api';
+
+// Use environment variable or default to localhost:5000
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
 
 const Login = () => {
   const navigate = useNavigate();
@@ -25,7 +27,6 @@ const Login = () => {
       setSuccess(message);
       setError('');
     }
-    // Clear message after 5 seconds
     setTimeout(() => {
       setError('');
       setSuccess('');
@@ -63,9 +64,11 @@ const Login = () => {
   // Test API connection first
   const testAPIConnection = async () => {
     try {
+      console.log('Testing connection to:', `${API_BASE_URL}/api/test`);
       const response = await axios.get(`${API_BASE_URL}/api/test`, {
         timeout: 5000
       });
+      console.log('API test response:', response.data);
       return response.status === 200;
     } catch (error) {
       console.log('API test failed:', error.message);
@@ -81,7 +84,7 @@ const Login = () => {
     setSuccess('');
 
     try {
-      console.log('Testing connection to:', API_BASE_URL);
+      console.log('Starting login process...');
       
       // First test if server is reachable
       const isServerReachable = await testAPIConnection();
@@ -89,9 +92,10 @@ const Login = () => {
         throw new Error(`Cannot connect to server at ${API_BASE_URL}. Please make sure the backend server is running.`);
       }
 
-      console.log('Attempting login to:', `${API_BASE_URL}/api/auth/login`);
+      console.log('Attempting login to:', `${API_BASE_URL}/auth/login`);
+      console.log('Login data:', { email: email.trim().toLowerCase() });
       
-      const response = await axios.post(`${API_BASE_URL}/api/auth/login`, {
+      const response = await axios.post(`${API_BASE_URL}/auth/login`, {
         email: email.trim().toLowerCase(),
         password: password.trim()
       }, {
@@ -101,6 +105,8 @@ const Login = () => {
         timeout: 10000,
       });
 
+      console.log('Login response:', response.data);
+
       const { data } = response;
 
       if (!data.success) {
@@ -108,11 +114,11 @@ const Login = () => {
       }
 
       if (!data.token || !data.user) {
-        throw new Error('Invalid response format');
+        throw new Error('Invalid response format from server');
       }
 
       // Check if user is admin
-      if (data.user.userType !== 'admin' && data.user.role !== 'admin') {
+      if (data.user.userType !== 'admin') {
         throw new Error('Access denied. This portal is for administrators only.');
       }
 
@@ -121,21 +127,20 @@ const Login = () => {
       localStorage.setItem('userData', JSON.stringify(data.user));
       localStorage.setItem('isAuthenticated', 'true');
       localStorage.setItem('userId', data.user.id || data.user._id);
-      localStorage.setItem('userType', 'admin');
+      localStorage.setItem('userType', data.user.userType);
 
-      showMessage('success', `Welcome back, ${data.user.name || data.user.username || data.user.email}!`);
+      showMessage('success', `Welcome back, ${data.user.username || data.user.email}!`);
       
       console.log('Login successful, redirecting to /dashboard');
       
       // Redirect to admin dashboard
       setTimeout(() => {
-        console.log('Navigating to /dashboard');
         navigate('/dashboard');
       }, 1000);
 
     } catch (error) {
       console.error('Login Error:', error);
-      console.error('Error details:', error.response?.data);
+      console.error('Error response:', error.response?.data);
       
       let errorMessage = 'An error occurred during login';
       
@@ -144,20 +149,22 @@ const Login = () => {
         if (error.response.status === 401) {
           errorMessage = 'Invalid email or password';
         } else if (error.response.status === 403) {
-          errorMessage = 'Access denied. This portal is for administrators only.';
+          errorMessage = error.response.data?.message || 'Access denied. Please verify your email or contact administrator.';
         } else if (error.response.status === 404) {
-          errorMessage = 'Login endpoint not found. Please check if the backend API is properly configured.';
+          errorMessage = 'Login endpoint not found. Please check backend configuration.';
+        } else if (error.response.status >= 500) {
+          errorMessage = 'Server error. Please try again later.';
         } else {
-          errorMessage = error.response.data?.message || `Server error: ${error.response.status}`;
+          errorMessage = error.response.data?.message || `Error: ${error.response.status}`;
         }
       } else if (error.request) {
         // Request made but no response
         errorMessage = `Cannot connect to server at ${API_BASE_URL}. Please ensure:
-        - Backend server is running
-        - Server is accessible at ${API_BASE_URL}
-        - No firewall blocking the connection`;
+        - Backend server is running on port 5000
+        - No firewall blocking the connection
+        - Server is accessible at ${API_BASE_URL}`;
       } else if (error.code === 'ECONNABORTED') {
-        errorMessage = 'Request timeout. Server might be overloaded or unreachable.';
+        errorMessage = 'Request timeout. Server might be overloaded.';
       } else {
         errorMessage = error.message || errorMessage;
       }
@@ -196,7 +203,7 @@ const Login = () => {
                 alt="NoiseWatch Logo"
                 onError={(e) => {
                   e.target.src = '/logo.png';
-                  e.target.onerror = null; // Prevent infinite loop
+                  e.target.onerror = null;
                 }}
               />
             </div>
@@ -237,18 +244,13 @@ const Login = () => {
                 <p className="subtitle">Access the NoiseWatch Administrative Dashboard</p>
               </div>
 
-              {/* Access Level Indicator */}
-              <div className="access-level">
-                <div className="access-level-badge">
-                  <span className="level-icon">🛡️</span>
-                  <span className="level-text">Administrative Level</span>
-                </div>
-              </div>
-
               {/* Server Status */}
               <div className="server-status">
                 <div className="server-status-text">
                   Server: {API_BASE_URL}
+                </div>
+                <div className="connection-status">
+                  Status: {loading ? 'Connecting...' : 'Ready'}
                 </div>
               </div>
 
@@ -318,13 +320,6 @@ const Login = () => {
                 </div>
               </div>
 
-              <a 
-                className="forgot-password"
-                href="/forgot-password"
-              >
-                Forgot Security Credentials?
-              </a>
-
               <button 
                 type="submit"
                 className={`login-button ${loading ? 'button-disabled' : ''}`}
@@ -353,12 +348,6 @@ const Login = () => {
                 <strong>Security Reminder:</strong> This system contains sensitive barangay data. 
                 Ensure you log out after each session and do not share your credentials.
               </p>
-            </div>
-
-            {/* Footer */}
-            <div className="footer">
-              <span className="footer-text">Need system access? </span>
-              <a href="/register" className="sign-up-text">Request Account</a>
             </div>
           </div>
         </div>

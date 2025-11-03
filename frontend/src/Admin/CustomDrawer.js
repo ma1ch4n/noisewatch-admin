@@ -1,77 +1,146 @@
 import React, { useState, useEffect } from 'react';
 import './CustomDrawer.css';
+import axios from 'axios';
+import { useNavigate } from 'react-router-dom';
 
-const CustomDrawer = ({ navigation, onClose }) => {
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+
+const CustomDrawer = ({ onClose }) => {
   const [profileData, setProfileData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [userType, setUserType] = useState('user');
+  const navigate = useNavigate();
 
   // Regular user menu items for noise monitoring
   const userMenuItems = [
-    { id: '1', title: 'Dashboard', icon: 'home', route: 'Home' },
-    { id: '2', title: 'Noise Map', icon: 'map', route: 'MapScreen' },
-    { id: '3', title: 'Report Noise', icon: 'mic', route: 'Record' },
-    { id: '4', title: 'My History', icon: 'history', route: 'MyHistory' },
-    { id: '5', title: 'Notifications', icon: 'notifications', route: 'Notifications' },
-    { id: '6', title: 'Analytics (Personal)', icon: 'analytics', route: 'PersonalAnalytics' },
+    { id: '1', title: 'Dashboard', icon: 'home', route: '/dashboard' },
+    { id: '2', title: 'Noise Map', icon: 'map', route: '/map' },
+    { id: '3', title: 'Report Noise', icon: 'mic', route: '/report' },
+    { id: '4', title: 'My History', icon: 'history', route: '/history' },
+    { id: '5', title: 'Notifications', icon: 'notifications', route: '/notifications' },
+    { id: '6', title: 'Analytics (Personal)', icon: 'analytics', route: '/analytics' },
   ];
 
-  // Admin menu items for noise monitoring
+  // Admin menu items for noise monitoring - USING REAL ROUTES
   const adminMenuItems = [
-    { id: '1', title: 'Dashboard', icon: 'speedometer', route: 'AdminDashboard' },
-    { id: '2', title: 'Noise Reports', icon: 'description', route: 'NoiseReports' },
-    { id: '3', title: 'Heatmap & Analytics', icon: 'bar_chart', route: 'HeatmapAnalytics' },
-    { id: '4', title: 'Users & Contributors', icon: 'people', route: 'UserManagement' },
-    { id: '5', title: 'Export Reports', icon: 'download', route: 'ExportReports' },
-    { id: '6', title: 'Notifications & Alerts', icon: 'warning', route: 'AdminNotifications' },
+    { id: '1', title: 'Dashboard', icon: 'speedometer', route: '/dashboard' },
+    { id: '2', title: 'Noise Reports', icon: 'description', route: '/admin/reports' },
+    { id: '3', title: 'Heatmap & Analytics', icon: 'bar_chart', route: '/admin/analytics' },
+    { id: '4', title: 'Users & Contributors', icon: 'people', route: '/admin/users' },
+    { id: '5', title: 'Export Reports', icon: 'download', route: '/admin/export' },
+    { id: '6', title: 'Notifications & Alerts', icon: 'warning', route: '/admin/notifications' },
   ];
 
   const bottomItems = [
-    { id: '7', title: 'Settings', icon: 'settings', route: 'Settings' },
-    { id: '8', title: 'Help & About', icon: 'help', route: 'HelpAbout' },
+    { id: '7', title: 'Settings', icon: 'settings', route: '/settings' },
+    { id: '8', title: 'Help & About', icon: 'help', route: '/help' },
   ];
 
   // Admin bottom items
   const adminBottomItems = [
-    { id: '7', title: 'Settings', icon: 'settings', route: 'AdminSettings' },
-    { id: '8', title: 'Help & Documentation', icon: 'menu_book', route: 'AdminHelp' },
+    { id: '7', title: 'Settings', icon: 'settings', route: '/admin/settings' },
+    { id: '8', title: 'Help & Documentation', icon: 'menu_book', route: '/admin/help' },
   ];
 
   const fetchProfile = async () => {
     try {
       setLoading(true);
       const token = localStorage.getItem('userToken');
-      if (!token) throw new Error('No authentication token found');
+      
+      if (!token) {
+        console.warn('No authentication token found');
+        // Use stored user data as fallback
+        const storedUserData = localStorage.getItem('userData');
+        if (storedUserData) {
+          const userData = JSON.parse(storedUserData);
+          setProfileData(userData);
+          setUserType(userData.userType || 'user');
+          setLoading(false);
+          return;
+        }
+        throw new Error('No authentication token found');
+      }
 
-      // Mock API call - replace with actual API
-      const mockUserData = {
-        username: 'John Doe',
-        email: 'john.doe@example.com',
-        profilePhoto: null,
-        userType: 'user'
-      };
+      console.log('Fetching profile from:', `${API_BASE_URL}/user/profile`);
+      
+      const response = await axios.get(`${API_BASE_URL}/user/profile`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        timeout: 10000,
+      });
 
-      setProfileData(mockUserData);
-      setUserType(mockUserData.userType || 'user');
+      console.log('Profile response:', response.data);
+
+      if (!response.data.success) {
+        throw new Error(response.data.message || 'Profile fetch failed');
+      }
+
+      const userData = response.data.user;
+      setProfileData(userData);
+      setUserType(userData.userType || userData.role || 'user');
+      
+      // Update localStorage with fresh data
+      localStorage.setItem('userData', JSON.stringify(userData));
       
     } catch (error) {
       console.error('Profile fetch error:', error);
-      // Fallback to mock data
-      const mockUserData = {
-        username: 'John Doe',
-        email: 'john.doe@example.com',
-        profilePhoto: null,
-        userType: 'user'
-      };
-      setProfileData(mockUserData);
+      
+      // Fallback to stored user data
+      const storedUserData = localStorage.getItem('userData');
+      if (storedUserData) {
+        try {
+          const userData = JSON.parse(storedUserData);
+          setProfileData(userData);
+          setUserType(userData.userType || 'user');
+          console.log('Using stored user data as fallback');
+        } catch (parseError) {
+          console.error('Error parsing stored user data:', parseError);
+          setFallbackUserData();
+        }
+      } else {
+        setFallbackUserData();
+      }
     } finally {
       setLoading(false);
+    }
+  };
+
+  const setFallbackUserData = () => {
+    // Ultimate fallback
+    const fallbackUser = {
+      username: 'User',
+      email: 'user@example.com',
+      profilePhoto: null,
+      userType: 'user'
+    };
+    setProfileData(fallbackUser);
+    setUserType('user');
+  };
+
+  const fetchAdminStats = async () => {
+    try {
+      const token = localStorage.getItem('userToken');
+      if (!token || (userType !== 'admin' && userType !== 'administrator')) return;
+
+      // You can add API calls here to fetch real admin stats
+      console.log('Fetching admin stats...');
+      
+    } catch (error) {
+      console.error('Error fetching admin stats:', error);
     }
   };
 
   useEffect(() => {
     fetchProfile();
   }, []);
+
+  useEffect(() => {
+    if (profileData && (userType === 'admin' || userType === 'administrator')) {
+      fetchAdminStats();
+    }
+  }, [profileData, userType]);
 
   const handleNavigation = (route) => {
     if (onClose) {
@@ -80,15 +149,11 @@ const CustomDrawer = ({ navigation, onClose }) => {
     
     setTimeout(() => {
       try {
-        const validRoutes = ['Home', 'MapScreen', 'UserProfile', 'AdminDashboard', 'UserManagement', 'Record', 'NoiseReports'];
+        console.log('Navigating to:', route);
         
-        if (validRoutes.includes(route)) {
-          // For web, we might use window.location or a router
-          console.log(`Navigating to: ${route}`);
-          // Example: window.location.href = `/${route.toLowerCase()}`;
-        } else {
-          alert(`${route} feature is under development`);
-        }
+        // Use React Router's navigate function
+        navigate(route);
+        
       } catch (error) {
         console.error('Navigation error:', error);
         alert('Unable to navigate to the selected screen');
@@ -104,14 +169,18 @@ const CustomDrawer = ({ navigation, onClose }) => {
 
   const performLogout = async () => {
     try {
+      // Clear all authentication data
       localStorage.removeItem('userToken');
       localStorage.removeItem('userData');
       localStorage.removeItem('isAuthenticated');
+      localStorage.removeItem('userId');
+      localStorage.removeItem('userType');
 
+      // Show logout message
       alert('You have been successfully logged out');
       
-      // Redirect to login page
-      window.location.href = '/login';
+      // Redirect to login page using React Router
+      navigate('/login');
     } catch (error) {
       console.error('Logout error:', error);
       alert('Something went wrong. Please try again.');
@@ -134,6 +203,7 @@ const CustomDrawer = ({ navigation, onClose }) => {
     return (
       <div className="drawer-container loading">
         <div className="loading-spinner large"></div>
+        <p>Loading profile...</p>
       </div>
     );
   }
@@ -228,7 +298,7 @@ const CustomDrawer = ({ navigation, onClose }) => {
 
           <button 
             className="profile-section"
-            onClick={() => handleNavigation('UserProfile')}
+            onClick={() => handleNavigation('/profile')}
           >
             <img
               src={user.profilePhoto || '/default-profile.png'}
@@ -278,28 +348,28 @@ const CustomDrawer = ({ navigation, onClose }) => {
               <div className="quick-actions-grid">
                 <button 
                   className="quick-action-button"
-                  onClick={() => handleNavigation('QuickRecord')}
+                  onClick={() => handleNavigation('/quick-record')}
                 >
                   <span className="material-icons">mic</span>
                   <span className="quick-action-text">Quick Record</span>
                 </button>
                 <button 
                   className="quick-action-button emergency-button"
-                  onClick={() => handleNavigation('EmergencyReport')}
+                  onClick={() => handleNavigation('/emergency')}
                 >
                   <span className="material-icons">warning</span>
                   <span className="quick-action-text">Emergency</span>
                 </button>
                 <button 
                   className="quick-action-button"
-                  onClick={() => handleNavigation('NearbyReports')}
+                  onClick={() => handleNavigation('/nearby')}
                 >
                   <span className="material-icons">location_on</span>
                   <span className="quick-action-text">Nearby</span>
                 </button>
                 <button 
                   className="quick-action-button"
-                  onClick={() => handleNavigation('MyStats')}
+                  onClick={() => handleNavigation('/stats')}
                 >
                   <span className="material-icons">insert_chart</span>
                   <span className="quick-action-text">My Stats</span>
@@ -315,28 +385,28 @@ const CustomDrawer = ({ navigation, onClose }) => {
               <div className="quick-actions-grid">
                 <button 
                   className="quick-action-button"
-                  onClick={() => handleNavigation('LiveMonitoring')}
+                  onClick={() => handleNavigation('/admin/monitoring')}
                 >
                   <span className="material-icons">monitor_heart</span>
                   <span className="quick-action-text">Live Monitor</span>
                 </button>
                 <button 
                   className="quick-action-button emergency-button"
-                  onClick={() => handleNavigation('SystemAlerts')}
+                  onClick={() => handleNavigation('/admin/alerts')}
                 >
                   <span className="material-icons">warning</span>
                   <span className="quick-action-text">System Alerts</span>
                 </button>
                 <button 
                   className="quick-action-button"
-                  onClick={() => handleNavigation('GenerateReport')}
+                  onClick={() => handleNavigation('/admin/generate-report')}
                 >
                   <span className="material-icons">description</span>
                   <span className="quick-action-text">Generate Report</span>
                 </button>
                 <button 
                   className="quick-action-button"
-                  onClick={() => handleNavigation('ManageThresholds')}
+                  onClick={() => handleNavigation('/admin/thresholds')}
                 >
                   <span className="material-icons">tune</span>
                   <span className="quick-action-text">Thresholds</span>
