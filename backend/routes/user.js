@@ -185,6 +185,62 @@ router.get('/getAllUsersOnly', async (req, res) => {
   }
 });
 
+// Deactivate/Activate user
+router.put('/toggle-status/:id', authenticate, async (req, res) => {
+  try {
+    const userId = req.params.id;
+    const { status } = req.body; // 'active' or 'inactive'
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'User ID is required'
+      });
+    }
+
+    if (!status || !['active', 'inactive'].includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Status must be either "active" or "inactive"'
+      });
+    }
+
+    // Find user by ID
+    const user = await User.findById(userId);
+    
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    // Update user status
+    user.isVerified = status === 'active';
+    await user.save();
+
+    return res.status(200).json({
+      success: true,
+      message: `User ${status === 'active' ? 'activated' : 'deactivated'} successfully`,
+      user: {
+        _id: user._id,
+        username: user.username,
+        email: user.email,
+        userType: user.userType,
+        isVerified: user.isVerified,
+        profilePhoto: user.profilePhoto,
+        status: user.isVerified ? 'active' : 'inactive'
+      }
+    });
+
+  } catch (error) {
+    console.error('Toggle Status Error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Error updating user status'
+    });
+  }
+});
 
 
 
