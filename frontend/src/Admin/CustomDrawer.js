@@ -286,7 +286,7 @@ const CustomDrawer = ({ onClose }) => {
         <div 
           className="drawer-header"
           style={{ 
-            background: `linear-gradient(135deg, ${gradientColors[0]} 0%, ${gradientColors[1]} 50%, ${gradientColors[2]} 100%)` 
+            background: `linear-gradient(110deg, ${gradientColors[0]} 0%, ${gradientColors[1]} 50%, ${gradientColors[2]} 100%)` 
           }}
         >
           <button

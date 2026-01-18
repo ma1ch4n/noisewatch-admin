@@ -163,7 +163,7 @@ const AdminDashboard = () => {
     <html>
     <head>
       <meta charset="utf-8">
-      <title>Noise Monitoring System - Admin Dashboard Report</title>
+      <title>NOISEWATCH - Admin Dashboard Report</title>
       <style>
         body {
           font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -268,7 +268,7 @@ const AdminDashboard = () => {
     </head>
     <body>
       <div class="header">
-        <h1>Noise Monitoring System</h1>
+        <h1>NOISEWATCH</h1>
         <p>Admin Dashboard Report</p>
       </div>
 
@@ -276,7 +276,7 @@ const AdminDashboard = () => {
         <h2>Report Information</h2>
         <p><strong>Generated on:</strong> ${currentDate} at ${currentTime}</p>
         <p><strong>Report Type:</strong> Complete Dashboard Overview</p>
-        <p><strong>Data Source:</strong> Live Noise Monitoring System</p>
+        <p><strong>Data Source:</strong> Live NOISEWATCH</p>
       </div>
 
       <div class="stats-grid">
@@ -658,7 +658,7 @@ const AdminDashboard = () => {
               </button>
             </div>
           </div>
-          <div className="header-title">Noise Monitor</div>
+          <div className="header-title"><h1>NOISEWATCH</h1></div>
           <div className="header-subtitle">Admin Dashboard</div>
         </div>
       </div>

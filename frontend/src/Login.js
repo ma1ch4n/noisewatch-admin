@@ -233,13 +233,13 @@ const Login = () => {
             <form onSubmit={handleSubmit}>
               {/* Header Section inside Form */}
               <div className="header-section">
-                <button 
+                {/* <button 
                   type="button"
                   className="back-button" 
                   onClick={() => navigate('/')}
                 >
                   <span className="back-arrow">←</span>
-                </button>
+                </button> */}
                 <h1 className="welcome-text">Official Login</h1>
                 <p className="subtitle">Access the NoiseWatch Administrative Dashboard</p>
               </div>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import './UserManagement.css';
 import CustomDrawer from './CustomDrawer';
 
@@ -11,10 +11,18 @@ const UserManagement = ({ setShowUserModal }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [showFilterDropdown, setShowFilterDropdown] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [selectedUser, setSelectedUser] = useState(null);
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [actionType, setActionType] = useState(''); // 'deactivate' or 'activate'
+  const [processing, setProcessing] = useState(false);
   const [selectedFilters, setSelectedFilters] = useState({
     userType: [],
     status: []
   });
+
+  // FIXED: Use correct base URL
+  const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
 
   // Drawer functions
   const openDrawer = () => {
@@ -25,57 +33,167 @@ const UserManagement = ({ setShowUserModal }) => {
     setDrawerVisible(false);
   };
 
+  // Fetch users from backend
+  const fetchUsers = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      console.log('📡 Fetching users from backend...');
+      
+      const endpoint = '/user/getAll';
+      const fullUrl = `${API_BASE_URL}${endpoint}`;
+      console.log('🔗 Fetching from:', fullUrl);
+      
+      const response = await fetch(fullUrl, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      });
+
+      console.log('📊 Response status:', response.status);
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.message || `HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      console.log('✅ API response received');
+      
+      if (data.success && data.users) {
+        // Transform API data
+        const transformedUsers = data.users.map(user => ({
+          _id: user._id || user.id,
+          name: user.username || 'Unknown User',
+          email: user.email || 'No email',
+          userType: user.userType || 'user',
+          status: user.isVerified ? 'active' : 'inactive',
+          profilePhoto: user.profilePhoto || null,
+          createdAt: user.createdAt || new Date().toISOString(),
+          isVerified: user.isVerified || false
+        }));
+        
+        console.log(`✅ Transformed ${transformedUsers.length} users`);
+        setUsers(transformedUsers);
+      } else {
+        throw new Error(data.message || 'Failed to fetch users');
+      }
+    } catch (error) {
+      console.error('❌ Failed to fetch users:', error);
+      setError(error.message);
+      setUsers([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Toggle user status (activate/deactivate)
+  const toggleUserStatus = async (userId, currentStatus) => {
+    try {
+      setProcessing(true);
+      
+      const newStatus = currentStatus === 'active' ? 'inactive' : 'active';
+      const endpoint = `/user/toggle-status/${userId}`;
+      const fullUrl = `${API_BASE_URL}${endpoint}`;
+      
+      console.log(`🔄 Toggling user ${userId} status to ${newStatus}`);
+      
+      const response = await fetch(fullUrl, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          // Add authorization if needed
+          // 'Authorization': `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify({ status: newStatus })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.message || `HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      
+      if (data.success) {
+        // Update local state
+        setUsers(prevUsers => 
+          prevUsers.map(user => 
+            user._id === userId 
+              ? { 
+                  ...user, 
+                  status: newStatus,
+                  isVerified: newStatus === 'active'
+                } 
+              : user
+          )
+        );
+        
+        console.log(`✅ User ${newStatus === 'active' ? 'activated' : 'deactivated'} successfully`);
+        alert(`User ${data.user.username} has been ${newStatus === 'active' ? 'activated' : 'deactivated'}`);
+        
+        // Close confirmation modal
+        setShowConfirmModal(false);
+        setSelectedUser(null);
+        setActionType('');
+      } else {
+        throw new Error(data.message || 'Failed to update user status');
+      }
+    } catch (error) {
+      console.error('❌ Failed to toggle user status:', error);
+      alert(`Error: ${error.message}`);
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  // Handle deactivate/activate confirmation
+  const handleStatusToggle = (user, action) => {
+    setSelectedUser(user);
+    setActionType(action);
+    setShowConfirmModal(true);
+  };
+
+  // Confirm action
+  const confirmAction = () => {
+    if (selectedUser) {
+      toggleUserStatus(selectedUser._id, selectedUser.status);
+    }
+  };
+
+  // Cancel action
+  const cancelAction = () => {
+    setShowConfirmModal(false);
+    setSelectedUser(null);
+    setActionType('');
+  };
+
+  // Simple test connection function
+  const testBackendConnection = async () => {
+    console.log('🧪 Testing backend connection...');
+    
+    try {
+      const response = await fetch(`${API_BASE_URL}/`);
+      console.log('Root endpoint:', response.status, response.statusText);
+      
+      const userResponse = await fetch(`${API_BASE_URL}/user/getAll`);
+      console.log('Users endpoint:', userResponse.status, userResponse.statusText);
+    } catch (error) {
+      console.error('Connection test failed:', error);
+    }
+  };
+
   // Fetch users on component mount
   useEffect(() => {
-    const fetchUsers = async () => {
-      try {
-        // Mock data - replace with actual API call
-        const mockUsers = [
-          {
-            _id: '1',
-            name: 'John Doe',
-            email: 'john.doe@example.com',
-            userType: 'admin',
-            status: 'active',
-            createdAt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
-          },
-          {
-            _id: '2',
-            name: 'Jane Smith',
-            email: 'jane.smith@example.com',
-            userType: 'user',
-            status: 'active',
-            createdAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString()
-          },
-          {
-            _id: '3',
-            name: 'Mike Johnson',
-            email: 'mike.johnson@example.com',
-            userType: 'vet',
-            status: 'inactive',
-            createdAt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
-          },
-          {
-            _id: '4',
-            name: 'Sarah Wilson',
-            email: 'sarah.wilson@example.com',
-            userType: 'user',
-            status: 'active',
-            createdAt: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString()
-          }
-        ];
-        
-        setUsers(mockUsers);
-      } catch (error) {
-        console.error('Failed to fetch users:', error);
-        alert('Failed to fetch users');
-      } finally {
-        setLoading(false);
-      }
-    };
-
     fetchUsers();
   }, []);
+
+  // Refresh users function
+  const refreshUsers = () => {
+    fetchUsers();
+  };
 
   const handleFilterChange = (filterType, value) => {
     setSelectedFilters(prev => ({
@@ -93,6 +211,7 @@ const UserManagement = ({ setShowUserModal }) => {
     });
   };
 
+  // Filter users based on search and filters
   const filteredUsers = users.filter(user => {
     const matchesSearch = 
       (user.name?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
@@ -130,6 +249,21 @@ const UserManagement = ({ setShowUserModal }) => {
     return baseClass;
   };
 
+  // Format date
+  const formatDate = (dateString) => {
+    if (!dateString) return 'Unknown';
+    try {
+      const date = new Date(dateString);
+      return date.toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric'
+      });
+    } catch (e) {
+      return 'Invalid date';
+    }
+  };
+
   const FilterOption = ({ label, isSelected, onPress }) => (
     <button className="filter-option" onClick={onPress}>
       <div className={`checkbox ${isSelected ? 'checkbox-selected' : ''}`}>
@@ -146,7 +280,7 @@ const UserManagement = ({ setShowUserModal }) => {
           <div className="filter-content">
             <div className="filter-section">
               <div className="filter-section-title">User Type</div>
-              {['user', 'admin', 'vet'].map(type => (
+              {['user', 'admin'].map(type => (
                 <FilterOption
                   key={type}
                   label={type}
@@ -170,10 +304,10 @@ const UserManagement = ({ setShowUserModal }) => {
             
             <div className="filter-actions">
               <button className="btn-text" onClick={clearFilters}>
-                <span className="btn-text-label">Clear All</span>
+                Clear All
               </button>
               <button className="btn-primary" onClick={() => setShowFilterDropdown(false)}>
-                <span className="btn-primary-label">Apply</span>
+                Apply
               </button>
             </div>
           </div>
@@ -186,7 +320,7 @@ const UserManagement = ({ setShowUserModal }) => {
     if (!hasActiveFilters) return null;
     
     const allFilters = [
-      ...selectedFilters.userType.map(type => ({ type: 'userType', value: type, label: `User Type: ${type}` })),
+      ...selectedFilters.userType.map(type => ({ type: 'userType', value: type, label: `Type: ${type}` })),
       ...selectedFilters.status.map(status => ({ type: 'status', value: status, label: `Status: ${status}` }))
     ];
 
@@ -212,8 +346,30 @@ const UserManagement = ({ setShowUserModal }) => {
   const renderUserItem = (user) => (
     <div key={user._id} className="user-row">
       <div className="user-info">
-        <div className="user-name">{user.name}</div>
-        <div className="user-email">{user.email}</div>
+        <div className="user-avatar-container">
+          {user.profilePhoto ? (
+            <img 
+              src={user.profilePhoto} 
+              alt={user.name}
+              className="user-avatar"
+              onError={(e) => {
+                e.target.onerror = null;
+                e.target.src = 'https://via.placeholder.com/40/cccccc/808080?text=U';
+              }}
+            />
+          ) : (
+            <div className="user-avatar-placeholder">
+              {user.name.charAt(0).toUpperCase()}
+            </div>
+          )}
+        </div>
+        <div className="user-details">
+          <div className="user-name">{user.name}</div>
+          <div className="user-email">{user.email}</div>
+          <div className="user-verified">
+            {user.isVerified ? '✅ Verified' : '⭕ Not Verified'}
+          </div>
+        </div>
       </div>
       <div className="user-meta">
         <div className={getBadgeStyle('userType', user.userType)}>
@@ -223,7 +379,28 @@ const UserManagement = ({ setShowUserModal }) => {
           <span className="badge-text">{user.status || 'active'}</span>
         </div>
         <div className="join-date">
-          {new Date(user.createdAt).toLocaleDateString()}
+          {formatDate(user.createdAt)}
+        </div>
+        <div className="user-actions">
+          {user.status === 'active' ? (
+            <button 
+              className="action-btn deactivate-btn"
+              onClick={() => handleStatusToggle(user, 'deactivate')}
+              title="Deactivate User"
+            >
+              <span className="material-icons">block</span>
+              Deactivate
+            </button>
+          ) : (
+            <button 
+              className="action-btn activate-btn"
+              onClick={() => handleStatusToggle(user, 'activate')}
+              title="Activate User"
+            >
+              <span className="material-icons">check_circle</span>
+              Activate
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -231,23 +408,125 @@ const UserManagement = ({ setShowUserModal }) => {
 
   const renderEmptyState = () => (
     <div className="empty-state">
+      <div className="empty-state-icon">
+        <span className="material-icons">group_off</span>
+      </div>
       <div className="empty-state-text">
-        {users.length === 0 ? 'No users found' : 'No users found matching your criteria'}
+        {error 
+          ? `Error: ${error}` 
+          : users.length === 0 
+            ? 'No users found in the database' 
+            : 'No users match your search/filters'
+        }
+      </div>
+      <div className="empty-state-actions">
+        <button className="btn-primary" onClick={refreshUsers}>
+          Refresh Users
+        </button>
+        <button className="btn-text" onClick={testBackendConnection}>
+          Test Connection
+        </button>
       </div>
     </div>
   );
+
+  // Confirmation Modal
+  const ConfirmationModal = () => {
+    if (!showConfirmModal || !selectedUser) return null;
+
+    const isDeactivating = actionType === 'deactivate';
+    const modalTitle = isDeactivating ? 'Deactivate User' : 'Activate User';
+    const actionText = isDeactivating ? 'deactivate' : 'activate';
+    const confirmButtonText = isDeactivating ? 'Deactivate User' : 'Activate User';
+    const confirmButtonClass = isDeactivating ? 'btn-danger' : 'btn-success';
+
+    return (
+      <div className="modal-overlay">
+        <div className="confirmation-modal">
+          <div className="modal-header">
+            <h3 className="modal-title">{modalTitle}</h3>
+            <button className="modal-close" onClick={cancelAction}>
+              <span className="material-icons">close</span>
+            </button>
+          </div>
+          
+          <div className="modal-content">
+            <div className="warning-icon">
+              <span className="material-icons">
+                {isDeactivating ? 'warning' : 'check_circle'}
+              </span>
+            </div>
+            
+            <p className="modal-message">
+              Are you sure you want to {actionText} <strong>{selectedUser.name}</strong>?
+            </p>
+            
+            {isDeactivating && (
+              <div className="warning-note">
+                <span className="material-icons">info</span>
+                <span>Deactivated users will not be able to log into the system.</span>
+              </div>
+            )}
+          </div>
+          
+          <div className="modal-actions">
+            <button 
+              className="btn-text" 
+              onClick={cancelAction}
+              disabled={processing}
+            >
+              Cancel
+            </button>
+            <button 
+              className={`btn-primary ${confirmButtonClass}`}
+              onClick={confirmAction}
+              disabled={processing}
+            >
+              {processing ? (
+                <>
+                  <span className="spinner-small"></span>
+                  Processing...
+                </>
+              ) : (
+                confirmButtonText
+              )}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   if (loading) {
     return (
       <div className="loading-container">
         <div className="loading-spinner large"></div>
         <div className="loading-text">Loading users...</div>
+        <button className="btn-text" onClick={testBackendConnection} style={{marginTop: '20px'}}>
+          Test Backend Connection
+        </button>
       </div>
     );
   }
 
   return (
     <div className="user-management-container">
+      {/* Debug info - remove in production */}
+      {error && (
+        <div className="error-banner">
+          <div className="error-content">
+            <span className="material-icons error-icon">error</span>
+            <span className="error-text">Error: {error}</span>
+            <button className="btn-text" onClick={refreshUsers}>
+              Retry
+            </button>
+            <button className="btn-text" onClick={() => console.log('Current users:', users)}>
+              Show Users Data
+            </button>
+          </div>
+        </div>
+      )}
+      
       {/* Header */}
       <div className="user-management-header">
         <div className="header-content">
@@ -257,14 +536,21 @@ const UserManagement = ({ setShowUserModal }) => {
             </button>
             <div className="header-title-section">
               <div className="header-title">User Management</div>
-              <div className="header-subtitle">Manage your users and roles</div>
+              <div className="header-subtitle">
+                Total Users: {users.length} | Showing: {filteredUsers.length}
+                {error && <span style={{color: 'red', marginLeft: '10px'}}>(Connection Error)</span>}
+              </div>
             </div>
             <div className="header-right">
-              <button className="header-button">
-                <span className="material-icons">notifications</span>
+              <button 
+                className="header-button"
+                onClick={refreshUsers}
+                title="Refresh Users"
+              >
+                <span className="material-icons">refresh</span>
               </button>
               <button className="header-button">
-                <span className="material-icons">settings</span>
+                <span className="material-icons">notifications</span>
               </button>
             </div>
           </div>
@@ -279,10 +565,18 @@ const UserManagement = ({ setShowUserModal }) => {
               <span className="material-icons search-icon">search</span>
               <input
                 className="search-input"
-                placeholder="Search users..."
+                placeholder="Search users by name or email..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
+              {searchTerm && (
+                <button 
+                  className="clear-search"
+                  onClick={() => setSearchTerm('')}
+                >
+                  <span className="material-icons">clear</span>
+                </button>
+              )}
             </div>
             <button 
               className={`filter-button ${hasActiveFilters ? 'filter-button-active' : ''}`}
@@ -309,6 +603,13 @@ const UserManagement = ({ setShowUserModal }) => {
               renderEmptyState()
             ) : (
               <div className="users-list-content">
+                <div className="users-list-header">
+                  <div className="header-name">User</div>
+                  <div className="header-type">Type</div>
+                  <div className="header-status">Status</div>
+                  <div className="header-date">Joined</div>
+                  <div className="header-actions">Actions</div>
+                </div>
                 {filteredUsers.map(user => renderUserItem(user))}
               </div>
             )}
@@ -317,6 +618,7 @@ const UserManagement = ({ setShowUserModal }) => {
       </div>
 
       <FilterModal />
+      <ConfirmationModal />
 
       {/* Custom Drawer */}
       {drawerVisible && (
