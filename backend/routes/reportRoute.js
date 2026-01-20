@@ -236,4 +236,167 @@ router.get("/total-reports", async (req, res) => {
   }
 });
 
+// Add these routes to your existing reportRoute.js
+
+// Dashboard summary
+router.get('/dashboard-summary', async (req, res) => {
+  try {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const [
+      totalReports,
+      reportsToday,
+      resolvedReports,
+      flaggedAreas
+    ] = await Promise.all([
+      NoiseReport.countDocuments(),
+      NoiseReport.countDocuments({ createdAt: { $gte: today } }),
+      NoiseReport.countDocuments({ status: 'resolved' }),
+      // Flagged areas are locations with 3+ reports in last 24 hours
+      NoiseReport.aggregate([
+        {
+          $match: {
+            createdAt: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) }
+          }
+        },
+        {
+          $group: {
+            _id: {
+              lat: { $round: ['$location.latitude', 2] },
+              lng: { $round: ['$location.longitude', 2] }
+            },
+            count: { $sum: 1 }
+          }
+        },
+        {
+          $match: {
+            count: { $gte: 3 }
+          }
+        },
+        {
+          $count: "flaggedAreas"
+        }
+      ])
+    ]);
+
+    res.json({
+      totalReports,
+      reportsToday,
+      resolvedReports,
+      flaggedAreas: flaggedAreas[0]?.flaggedAreas || 0
+    });
+  } catch (error) {
+    console.error('Error fetching dashboard summary:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Recent reports
+router.get('/recent-reports', async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 10;
+    
+    const recentReports = await NoiseReport.find()
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .populate('userId', 'username email')
+      .lean();
+
+    res.json(recentReports);
+  } catch (error) {
+    console.error('Error fetching recent reports:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+
+// Dashboard summary endpoint
+router.get('/dashboard-summary', async (req, res) => {
+  try {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const [
+      totalReports,
+      reportsToday,
+      resolvedReports,
+      flaggedAreas
+    ] = await Promise.all([
+      NoiseReport.countDocuments(),
+      NoiseReport.countDocuments({ createdAt: { $gte: today } }),
+      NoiseReport.countDocuments({ status: 'resolved' }),
+      // Flagged areas are locations with 3+ reports in last 24 hours
+      NoiseReport.aggregate([
+        {
+          $match: {
+            createdAt: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+            'location.latitude': { $exists: true, $ne: null },
+            'location.longitude': { $exists: true, $ne: null }
+          }
+        },
+        {
+          $group: {
+            _id: {
+              lat: { $round: ['$location.latitude', 2] },
+              lng: { $round: ['$location.longitude', 2] }
+            },
+            count: { $sum: 1 }
+          }
+        },
+        {
+          $match: {
+            count: { $gte: 3 }
+          }
+        },
+        {
+          $count: "flaggedAreas"
+        }
+      ])
+    ]);
+
+    const flaggedAreasCount = flaggedAreas[0]?.flaggedAreas || 0;
+
+    res.json({
+      totalReports,
+      reportsToday,
+      resolvedReports,
+      flaggedAreas: flaggedAreasCount
+    });
+  } catch (error) {
+    console.error('Error fetching dashboard summary:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Recent reports endpoint
+router.get('/recent-reports', async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 10;
+    
+    const recentReports = await NoiseReport.find()
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .populate('userId', 'username email')
+      .lean();
+
+    // Format the reports for the dashboard
+    const formattedReports = recentReports.map(report => ({
+      _id: report._id,
+      reason: report.reason,
+      comment: report.comment,
+      location: report.location,
+      noiseLevel: report.noiseLevel,
+      status: report.status,
+      createdAt: report.createdAt,
+      userId: report.userId
+    }));
+
+    res.json(formattedReports);
+  } catch (error) {
+    console.error('Error fetching recent reports:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 module.exports = router;

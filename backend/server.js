@@ -36,7 +36,8 @@ app.get('/', (req, res) => {
     endpoints: {
       auth: '/auth',
       users: '/user', 
-      reports: '/reports'
+      reports: '/reports',
+      analytics: '/analytics'
     }
   });
 });
@@ -44,6 +45,7 @@ app.get('/', (req, res) => {
 app.use('/auth', require('./routes/auth'));
 app.use('/user', require('./routes/user'));
 app.use('/reports', require('./routes/reportRoute'));
+app.use('/analytics', require('./routes/analytics'));
 
 app.use(cors({
   origin: '*', // Allow all origins in development
