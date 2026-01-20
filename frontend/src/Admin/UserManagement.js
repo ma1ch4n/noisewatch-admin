@@ -345,6 +345,7 @@ const UserManagement = ({ setShowUserModal }) => {
 
   const renderUserItem = (user) => (
     <div key={user._id} className="user-row">
+      {/* Column 1: User Info */}
       <div className="user-info">
         <div className="user-avatar-container">
           {user.profilePhoto ? (
@@ -371,16 +372,30 @@ const UserManagement = ({ setShowUserModal }) => {
           </div>
         </div>
       </div>
-      <div className="user-meta">
+      
+      {/* Column 2: User Type */}
+      <div className="user-type-column">
         <div className={getBadgeStyle('userType', user.userType)}>
           <span className="badge-text">{user.userType}</span>
         </div>
+      </div>
+      
+      {/* Column 3: Status */}
+      <div className="user-status-column">
         <div className={getBadgeStyle('status', user.status || 'active')}>
           <span className="badge-text">{user.status || 'active'}</span>
         </div>
+      </div>
+      
+      {/* Column 4: Join Date */}
+      <div className="user-date-column">
         <div className="join-date">
           {formatDate(user.createdAt)}
         </div>
+      </div>
+      
+      {/* Column 5: Actions */}
+      <div className="user-actions-container">
         <div className="user-actions">
           {user.status === 'active' ? (
             <button 

@@ -19,6 +19,7 @@ const NoiseReports = ({ navigation }) => {
   const [audioProgress, setAudioProgress] = useState({});
   const [audioDuration, setAudioDuration] = useState({});
   const [videoLoading, setVideoLoading] = useState({});
+  const [fullscreenVideo, setFullscreenVideo] = useState(null);
 
   // API endpoint
   const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
@@ -38,6 +39,21 @@ const NoiseReports = ({ navigation }) => {
           video.src = '';
         }
       });
+    };
+  }, []);
+
+  // Handle fullscreen change
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      if (!document.fullscreenElement) {
+        setFullscreenVideo(null);
+      }
+    };
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
     };
   }, []);
 
@@ -202,38 +218,46 @@ const NoiseReports = ({ navigation }) => {
   const playAudio = async (audioUri, reportId) => {
     try {
       console.log('🎵 Attempting to play audio for report:', reportId);
-      console.log('🔗 Original URL:', audioUri);
+      console.log('🔗 Audio URL:', audioUri);
       
-      // Stop any currently playing audio
-      if (audioRef.current && playingAudio === reportId) {
-        console.log('⏸️ Stopping current audio');
+      // If clicking the same audio that's playing, pause it
+      if (playingAudio === reportId && audioRef.current) {
+        console.log('⏸️ Pausing current audio');
         audioRef.current.pause();
         setPlayingAudio(null);
         return;
-      } else if (audioRef.current) {
+      }
+      
+      // Stop any currently playing audio
+      if (audioRef.current) {
         audioRef.current.pause();
-        setPlayingAudio(null);
+        audioRef.current.src = '';
+      }
+
+      // Test if URL is accessible
+      console.log('🔍 Testing URL accessibility...');
+      try {
+        const testResponse = await fetch(audioUri, { method: 'HEAD' });
+        console.log('✅ URL accessible:', testResponse.status);
+      } catch (fetchError) {
+        console.warn('⚠️ URL might not be directly accessible:', fetchError.message);
       }
 
       // Create new audio element
       const newAudio = new Audio();
       audioRef.current = newAudio;
       
-      // Use Cloudinary URL directly for audio
-      let finalAudioUri = audioUri;
-      console.log('🔧 Using URL:', finalAudioUri);
-      
       // Set up event listeners
       newAudio.addEventListener('error', (e) => {
         console.error('❌ Audio error event:', e);
         console.error('Audio error code:', newAudio.error?.code);
         console.error('Audio error message:', newAudio.error?.message);
-        alert('Could not play audio. Please check if the file exists and is accessible.');
+        alert('Could not play audio. The audio file might be corrupted or inaccessible.');
         setPlayingAudio(null);
       });
 
       newAudio.addEventListener('loadedmetadata', () => {
-        console.log('✅ Audio metadata loaded');
+        console.log('✅ Audio metadata loaded, duration:', newAudio.duration);
         setAudioDuration(prev => ({
           ...prev,
           [reportId]: newAudio.duration
@@ -248,11 +272,11 @@ const NoiseReports = ({ navigation }) => {
       });
 
       newAudio.addEventListener('canplay', () => {
-        console.log('✅ Audio can play');
+        console.log('✅ Audio can play now');
       });
 
-      newAudio.addEventListener('playing', () => {
-        console.log('▶️ Audio is playing');
+      newAudio.addEventListener('canplaythrough', () => {
+        console.log('✅ Audio can play through without buffering');
       });
 
       newAudio.addEventListener('ended', () => {
@@ -266,20 +290,39 @@ const NoiseReports = ({ navigation }) => {
 
       // Set audio properties
       newAudio.crossOrigin = 'anonymous';
-      newAudio.preload = 'auto';
-      newAudio.src = finalAudioUri;
+      newAudio.preload = 'metadata';
+      newAudio.src = audioUri;
       
-      // Try to play
-      console.log('▶️ Attempting playback...');
+      console.log('🔧 Audio element setup complete, attempting to load...');
+      
+      // Try to load first, then play
       try {
+        await newAudio.load();
+        console.log('✅ Audio loaded successfully');
+        
+        // Give browser time to process
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        console.log('▶️ Attempting playback...');
         await newAudio.play();
         console.log('✅ Audio playing successfully');
         setPlayingAudio(reportId);
+        
       } catch (playError) {
         console.error('❌ Play error:', playError);
         
         if (playError.name === 'NotAllowedError') {
-          alert('Audio playback was blocked by browser autoplay policies. Please click the play button again.');
+          console.warn('⚠️ Autoplay prevented, trying with user interaction...');
+          // Try again with user interaction
+          const playPromise = newAudio.play();
+          if (playPromise !== undefined) {
+            playPromise.catch(err => {
+              console.error('❌ Second play attempt failed:', err);
+              alert('Please click the play button again to start audio playback.');
+            });
+          }
+        } else if (playError.name === 'NotSupportedError') {
+          alert('Audio format not supported. Please check if the audio file is in a supported format (MP3, WAV, OGG).');
         } else {
           alert('Could not play audio: ' + playError.message);
         }
@@ -287,7 +330,7 @@ const NoiseReports = ({ navigation }) => {
       }
     } catch (error) {
       console.error('❌ Error in playAudio function:', error);
-      alert('Could not play audio. Please try again.');
+      alert('Could not play audio. Please check the audio file URL.');
       setPlayingAudio(null);
     }
   };
@@ -301,18 +344,21 @@ const NoiseReports = ({ navigation }) => {
   };
 
   const handleAudioProgress = (reportId, value) => {
-    if (audioRef.current) {
-      const newTime = (value / 100) * (audioDuration[reportId] || 0);
-      audioRef.current.currentTime = newTime;
-      setAudioProgress(prev => ({
-        ...prev,
-        [reportId]: newTime
-      }));
+    if (audioRef.current && playingAudio === reportId) {
+      const duration = audioDuration[reportId] || 0;
+      if (duration > 0) {
+        const newTime = (value / 100) * duration;
+        audioRef.current.currentTime = newTime;
+        setAudioProgress(prev => ({
+          ...prev,
+          [reportId]: newTime
+        }));
+      }
     }
   };
 
   const formatTime = (seconds) => {
-    if (!seconds) return '0:00';
+    if (!seconds || isNaN(seconds)) return '0:00';
     const mins = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
     return `${mins}:${secs.toString().padStart(2, '0')}`;
@@ -337,6 +383,32 @@ const NoiseReports = ({ navigation }) => {
       ...prev,
       [reportId]: false
     }));
+    alert('Could not load video. Please check the video URL.');
+  };
+
+  const toggleFullscreen = async (reportId) => {
+    const videoElement = videoRefs.current[reportId];
+    if (!videoElement) return;
+
+    try {
+      if (!document.fullscreenElement) {
+        await videoElement.requestFullscreen();
+        setFullscreenVideo(reportId);
+      } else {
+        await document.exitFullscreen();
+        setFullscreenVideo(null);
+      }
+    } catch (error) {
+      console.error('Fullscreen error:', error);
+      // Fallback for browsers that don't support fullscreen API
+      if (!document.fullscreenElement) {
+        videoElement.classList.add('fullscreen');
+        setFullscreenVideo(reportId);
+      } else {
+        videoElement.classList.remove('fullscreen');
+        setFullscreenVideo(null);
+      }
+    }
   };
 
   const getFilteredReports = () => {
@@ -410,7 +482,9 @@ const NoiseReports = ({ navigation }) => {
   // Debug function to check Cloudinary URL
   const debugMediaUrl = (url) => {
     console.log('🔍 Debugging URL:', url);
-    if (url.includes('cloudinary.com')) {
+    console.log('URL Type:', typeof url);
+    console.log('URL Length:', url?.length);
+    if (url?.includes('cloudinary.com')) {
       console.log('☁️ Cloudinary URL detected');
       console.log('URL parts:', url.split('/'));
     }
@@ -450,11 +524,7 @@ const NoiseReports = ({ navigation }) => {
                   className="play-pause-button"
                   onClick={(e) => {
                     e.stopPropagation();
-                    if (playingAudio === report._id) {
-                      pauseAudio();
-                    } else {
-                      playAudio(report.mediaUrl, report._id);
-                    }
+                    playAudio(report.mediaUrl, report._id);
                   }}
                   disabled={!report.mediaUrl}
                 >
@@ -489,15 +559,29 @@ const NoiseReports = ({ navigation }) => {
               </div>
               {process.env.NODE_ENV === 'development' && (
                 <div className="debug-info">
-                  <small>URL: {report.mediaUrl.substring(0, 50)}...</small>
+                  <small>URL: {report.mediaUrl?.substring(0, 50)}...</small>
                   <button 
                     onClick={(e) => {
                       e.stopPropagation();
                       debugMediaUrl(report.mediaUrl);
                     }}
-                    className="debug-button"
+                    className="debug-button-small"
                   >
                     Debug
+                  </button>
+                  <button 
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      console.log('Audio state:', {
+                        playing: playingAudio === report._id,
+                        duration: audioDuration[report._id],
+                        progress: audioProgress[report._id],
+                        audioRef: audioRef.current
+                      });
+                    }}
+                    className="debug-button-small"
+                  >
+                    State
                   </button>
                 </div>
               )}
@@ -508,6 +592,8 @@ const NoiseReports = ({ navigation }) => {
     }
 
     if (report.mediaType === 'video') {
+      const isFullscreen = fullscreenVideo === report._id;
+
       return (
         <div className="detail-section">
           <div className="detail-header">
@@ -523,9 +609,21 @@ const NoiseReports = ({ navigation }) => {
                 <span>VIDEO</span>
               </div>
               <div className="cloudinary-badge">Cloudinary</div>
+              <button 
+                className="fullscreen-button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleFullscreen(report._id);
+                }}
+                title={isFullscreen ? "Exit Fullscreen" : "Enter Fullscreen"}
+              >
+                <span className="material-icons">
+                  {isFullscreen ? "fullscreen_exit" : "fullscreen"}
+                </span>
+              </button>
             </div>
 
-            <div className="video-player">
+            <div className={`video-player ${isFullscreen ? 'video-fullscreen' : ''}`}>
               {videoLoading[report._id] && (
                 <div className="media-loading">
                   <div className="loading-spinner"></div>
@@ -535,7 +633,7 @@ const NoiseReports = ({ navigation }) => {
               <video
                 ref={el => videoRefs.current[report._id] = el}
                 src={report.mediaUrl}
-                className="video-element"
+                className={`video-element ${isFullscreen ? 'video-element-fullscreen' : ''}`}
                 controls
                 preload="metadata"
                 crossOrigin="anonymous"
@@ -554,13 +652,13 @@ const NoiseReports = ({ navigation }) => {
               </div>
               {process.env.NODE_ENV === 'development' && (
                 <div className="debug-info">
-                  <small>URL: {report.mediaUrl.substring(0, 50)}...</small>
+                  <small>URL: {report.mediaUrl?.substring(0, 50)}...</small>
                   <button 
                     onClick={(e) => {
                       e.stopPropagation();
                       debugMediaUrl(report.mediaUrl);
                     }}
-                    className="debug-button"
+                    className="debug-button-small"
                   >
                     Debug
                   </button>

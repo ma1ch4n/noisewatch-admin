@@ -1,160 +1,109 @@
-import React, { useState, useEffect } from 'react'; // Removed unused useRef
+import React, { useState, useEffect } from 'react';
 import './AdminDashboard.css';
-import CustomDrawer from './CustomDrawer'; // Import CustomDrawer
-
+import CustomDrawer from './CustomDrawer';
 
 const AdminDashboard = () => {
-  // Drawer state
   const [drawerVisible, setDrawerVisible] = useState(false);
-  
-  // Data state
-  const [data, setData] = useState({
-    reportsToday: 0,
-    flaggedAreas: 0,
-    totalReports: 0,
-    resolvedReports: 0,
-    recentReports: [],
-    noiseCategories: [
-      { type: 'traffic', count: 45, color: '#D2B48C' },
-      { type: 'music', count: 32, color: '#DAA520' },
-      { type: 'construction', count: 28, color: '#B8860B' },
-      { type: 'shouting', count: 15, color: '#8B7355' },
-      { type: 'machinery', count: 12, color: '#CD853F' }
-    ],
-    topNoiseSources: [
-      { location: 'Main Street & 5th Ave', reports: 18, level: 'high' },
-      { location: 'Central Park Area', reports: 14, level: 'medium' },
-      { location: 'Industrial Zone', reports: 12, level: 'high' },
-      { location: 'University District', reports: 9, level: 'medium' },
-      { location: 'Downtown Plaza', reports: 7, level: 'low' }
-    ],
-    alerts: [
-      { id: 1, type: 'repeated', location: 'Main Street', message: '5 reports in 2 hours', severity: 'high' },
-      { id: 2, type: 'threshold', location: 'Industrial Zone', message: 'Noise level above 85dB', severity: 'critical' },
-      { id: 3, type: 'pattern', location: 'University District', message: 'Late night disturbances', severity: 'medium' }
-    ]
-  });
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState(null);
+  const [selectedPeriod, setSelectedPeriod] = useState('weekly');
+  const [userStats, setUserStats] = useState(null);
+  const [reportStats, setReportStats] = useState(null);
+  const [recentActivity, setRecentActivity] = useState([]);
   const [exportLoading, setExportLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [currentTime, setCurrentTime] = useState(new Date());
+  const [adminName, setAdminName] = useState('');
 
-  // Mock data - replace with actual API calls
-  const fetchData = async (isRefresh = false) => {
+  // API endpoint
+  const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+
+  useEffect(() => {
+    // Get admin name from localStorage or default
+    const storedAdmin = localStorage.getItem('adminName') || 'Administrator';
+    setAdminName(storedAdmin);
+    
+    fetchAnalytics();
+    
+    // Set up polling to refresh data every 30 seconds
+    const interval = setInterval(() => fetchAnalytics(true), 30000);
+    
+    // Update clock every second
+    const clockInterval = setInterval(() => {
+      setCurrentTime(new Date());
+    }, 1000);
+    
+    return () => {
+      clearInterval(interval);
+      clearInterval(clockInterval);
+    };
+  }, [selectedPeriod]);
+
+  const fetchAnalytics = async (isRefresh = false) => {
     try {
       if (isRefresh) {
         setRefreshing(true);
       } else {
         setLoading(true);
       }
-      setError(null);
+      
+      console.log('📊 Fetching analytics...');
+      
+      // Fetch all data in parallel
+      const [userResponse, reportResponse, activityResponse] = await Promise.all([
+        fetch(`${API_BASE_URL}/analytics/users?period=${selectedPeriod}`),
+        fetch(`${API_BASE_URL}/analytics/reports?period=${selectedPeriod}`),
+        fetch(`${API_BASE_URL}/analytics/recent-activity`)
+      ]);
 
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      if (!userResponse.ok) throw new Error('Failed to fetch user analytics');
+      if (!reportResponse.ok) throw new Error('Failed to fetch report analytics');
+      if (!activityResponse.ok) throw new Error('Failed to fetch recent activity');
 
-      // Mock recent reports data
-      const mockRecentReports = [
-        {
-          id: 1,
-          type: 'traffic',
-          location: 'Main Street & 5th Ave',
-          reporter: 'John Doe',
-          time: '2 min ago',
-          level: 'high',
-          status: 'pending'
-        },
-        {
-          id: 2,
-          type: 'music',
-          location: 'Central Park',
-          reporter: 'Jane Smith',
-          time: '5 min ago',
-          level: 'medium',
-          status: 'investigating'
-        },
-        {
-          id: 3,
-          type: 'construction',
-          location: 'Industrial Zone',
-          reporter: 'Mike Johnson',
-          time: '8 min ago',
-          level: 'high',
-          status: 'resolved'
-        },
-        {
-          id: 4,
-          type: 'shouting',
-          location: 'University District',
-          reporter: 'Sarah Wilson',
-          time: '12 min ago',
-          level: 'low',
-          status: 'pending'
-        },
-        {
-          id: 5,
-          type: 'machinery',
-          location: 'Downtown Plaza',
-          reporter: 'David Brown',
-          time: '15 min ago',
-          level: 'medium',
-          status: 'resolved'
-        }
-      ];
-
-      setData(prevData => ({
-        ...prevData,
-        reportsToday: 47,
-        flaggedAreas: 3,
-        totalReports: 132,
-        resolvedReports: 85,
-        recentReports: mockRecentReports
-      }));
-    } catch (err) {
-      setError(err.message);
-      console.error('Error fetching data:', err);
+      const userData = await userResponse.json();
+      const reportData = await reportResponse.json();
+      const activityData = await activityResponse.json();
+      
+      setUserStats(userData);
+      setReportStats(reportData);
+      setRecentActivity(activityData);
+      
+    } catch (error) {
+      console.error('Error fetching analytics:', error);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   };
 
-  useEffect(() => {
-    fetchData();
-    // Set up polling to refresh data every 30 seconds
-    const interval = setInterval(() => fetchData(true), 30000);
-    return () => clearInterval(interval);
-  }, []);
-
-  // PDF Report Generation for noise monitoring
   const generateHTMLReport = () => {
     const currentDate = new Date().toLocaleDateString();
     const currentTime = new Date().toLocaleTimeString();
     
-    const totalCategoryReports = data.noiseCategories.reduce((sum, cat) => sum + cat.count, 0);
-
-    const categoryListHTML = data.noiseCategories.map((category, index) => `
+    const noiseLevelReports = reportStats?.noiseLevels?.reduce((sum, level) => sum + level.count, 0) || 0;
+    const noiseLevelsHTML = reportStats?.noiseLevels?.map((level, index) => `
       <tr style="border-bottom: 1px solid #e2e8f0;">
         <td style="padding: 8px; text-align: left;">${index + 1}</td>
-        <td style="padding: 8px; text-align: left; text-transform: capitalize;">${category.type}</td>
-        <td style="padding: 8px; text-align: center;">${category.count}</td>
-        <td style="padding: 8px; text-align: center;">${((category.count / totalCategoryReports) * 100).toFixed(1)}%</td>
+        <td style="padding: 8px; text-align: left; text-transform: capitalize;">${level.level}</td>
+        <td style="padding: 8px; text-align: center;">${level.count}</td>
+        <td style="padding: 8px; text-align: center;">${level.percentage || 0}%</td>
       </tr>
-    `).join('');
+    `).join('') || '';
 
-    const recentReportsHTML = data.recentReports.slice(0, 10).map((report, index) => `
+    const userTypesHTML = userStats?.userByType?.map((type, index) => `
       <tr style="border-bottom: 1px solid #e2e8f0;">
         <td style="padding: 8px; text-align: left;">${index + 1}</td>
-        <td style="padding: 8px; text-align: left; text-transform: capitalize;">${report.type}</td>
-        <td style="padding: 8px; text-align: left;">${report.location}</td>
-        <td style="padding: 8px; text-align: left;">${report.reporter}</td>
-        <td style="padding: 8px; text-align: left;">${report.time}</td>
-        <td style="padding: 8px; text-align: center;">
-          <span style="padding: 4px 8px; border-radius: 12px; font-size: 12px; color: white; background-color: ${
-            report.status === 'resolved' ? '#8B7355' : report.status === 'investigating' ? '#DAA520' : '#B8860B'
-          };">
-            ${report.status}
-          </span>
-        </td>
+        <td style="padding: 8px; text-align: left; text-transform: capitalize;">${type.type}</td>
+        <td style="padding: 8px; text-align: center;">${type.count}</td>
+      </tr>
+    `).join('') || '';
+
+    const recentActivityHTML = recentActivity.slice(0, 10).map((activity, index) => `
+      <tr style="border-bottom: 1px solid #e2e8f0;">
+        <td style="padding: 8px; text-align: left;">${index + 1}</td>
+        <td style="padding: 8px; text-align: left;">${activity.user || 'Anonymous'}</td>
+        <td style="padding: 8px; text-align: left;">${activity.action || 'Activity'}</td>
+        <td style="padding: 8px; text-align: left;">${activity.location || 'N/A'}</td>
+        <td style="padding: 8px; text-align: left;">${activity.time || 'Just now'}</td>
       </tr>
     `).join('');
 
@@ -163,7 +112,7 @@ const AdminDashboard = () => {
     <html>
     <head>
       <meta charset="utf-8">
-      <title>NOISEWATCH - Admin Dashboard Report</title>
+      <title>NOISEWATCH - Analytics Dashboard Report</title>
       <style>
         body {
           font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -269,73 +218,90 @@ const AdminDashboard = () => {
     <body>
       <div class="header">
         <h1>NOISEWATCH</h1>
-        <p>Admin Dashboard Report</p>
+        <p>Analytics Dashboard Report - ${selectedPeriod.toUpperCase()}</p>
+        <p><small>Generated by: ${adminName} on ${currentDate} at ${currentTime}</small></p>
       </div>
 
       <div class="report-info">
         <h2>Report Information</h2>
         <p><strong>Generated on:</strong> ${currentDate} at ${currentTime}</p>
-        <p><strong>Report Type:</strong> Complete Dashboard Overview</p>
-        <p><strong>Data Source:</strong> Live NOISEWATCH</p>
+        <p><strong>Time Period:</strong> ${selectedPeriod.charAt(0).toUpperCase() + selectedPeriod.slice(1)}</p>
+        <p><strong>Report Type:</strong> Complete Analytics Overview</p>
+        <p><strong>Generated by:</strong> ${adminName}</p>
       </div>
 
       <div class="stats-grid">
         <div class="stats-card">
-          <h3>Reports Today</h3>
-          <div class="value">${data.reportsToday}</div>
+          <h3>Total Users</h3>
+          <div class="value">${userStats?.totalUsers || 0}</div>
         </div>
         <div class="stats-card">
-          <h3>Flagged Areas</h3>
-          <div class="value">${data.flaggedAreas}</div>
+          <h3>Active Users</h3>
+          <div class="value">${userStats?.activeUsers || 0}</div>
         </div>
         <div class="stats-card">
           <h3>Total Reports</h3>
-          <div class="value">${data.totalReports}</div>
+          <div class="value">${reportStats?.totalReports || 0}</div>
         </div>
         <div class="stats-card">
           <h3>Resolved Reports</h3>
-          <div class="value">${data.resolvedReports}</div>
+          <div class="value">${reportStats?.reportStatus?.find(r => r.status === 'resolved')?.count || 0}</div>
         </div>
       </div>
 
       <div class="section">
-        <h2>Noise Categories Breakdown</h2>
+        <h2>Noise Level Distribution</h2>
         <table class="table">
           <thead>
             <tr>
               <th>#</th>
-              <th>Category</th>
+              <th>Noise Level</th>
               <th>Reports</th>
               <th>Percentage</th>
             </tr>
           </thead>
           <tbody>
-            ${categoryListHTML}
+            ${noiseLevelsHTML}
           </tbody>
         </table>
       </div>
 
       <div class="section">
-        <h2>Recent Reports</h2>
+        <h2>User Distribution</h2>
         <table class="table">
           <thead>
             <tr>
               <th>#</th>
-              <th>Type</th>
-              <th>Location</th>
-              <th>Reporter</th>
-              <th>Time</th>
-              <th>Status</th>
+              <th>User Type</th>
+              <th>Count</th>
             </tr>
           </thead>
           <tbody>
-            ${recentReportsHTML}
+            ${userTypesHTML}
+          </tbody>
+        </table>
+      </div>
+
+      <div class="section">
+        <h2>Recent Activity</h2>
+        <table class="table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>User</th>
+              <th>Action</th>
+              <th>Location</th>
+              <th>Time</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${recentActivityHTML}
           </tbody>
         </table>
       </div>
 
       <div class="footer">
-        <p>This report was automatically generated by the Noise Monitoring Admin System</p>
+        <p>This report was automatically generated by the NOISEWATCH Analytics System</p>
         <p>For questions or support, please contact the system administrator</p>
       </div>
     </body>
@@ -348,27 +314,24 @@ const AdminDashboard = () => {
       setExportLoading(true);
       const htmlContent = generateHTMLReport();
       
-      // Create a blob and download the file
       const blob = new Blob([htmlContent], { type: 'text/html' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `Noise_Monitoring_Report_${new Date().toISOString().split('T')[0]}.html`;
+      a.download = `NOISEWATCH_Analytics_Report_${new Date().toISOString().split('T')[0]}.html`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
       
-      alert('Report generated successfully!');
+      console.log('Report generated successfully!');
     } catch (error) {
       console.error('Error generating report:', error);
-      alert('Could not generate report.');
     } finally {
       setExportLoading(false);
     }
   };
 
-  // Drawer functions
   const openDrawer = () => {
     setDrawerVisible(true);
   };
@@ -379,14 +342,41 @@ const AdminDashboard = () => {
 
   const handleLogout = async () => {
     if (window.confirm('Are you sure you want to logout?')) {
-      // Clear storage and redirect
       localStorage.clear();
       window.location.href = '/login';
     }
   };
 
-  // Render functions
-  const renderSummaryCard = (title, value, icon, color, trend, loading) => (
+  const refreshAnalytics = () => {
+    fetchAnalytics(true);
+  };
+
+  const periods = [
+    { id: 'daily', label: 'Daily' },
+    { id: 'weekly', label: 'Weekly' },
+    { id: 'monthly', label: 'Monthly' },
+    { id: 'yearly', label: 'Yearly' }
+  ];
+
+  const formatTime = (date) => {
+    return date.toLocaleTimeString('en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: true
+    });
+  };
+
+  const formatDate = (date) => {
+    return date.toLocaleDateString('en-US', {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric'
+    });
+  };
+
+  const renderSummaryCard = (title, value, icon, color, loading) => (
     <div className={`summary-card ${loading ? 'loading' : ''}`} style={{ borderLeftColor: color }}>
       <div className="summary-content">
         <div className="summary-info">
@@ -395,8 +385,7 @@ const AdminDashboard = () => {
             <div className="loading-spinner"></div>
           ) : (
             <div>
-              <div className="summary-value" style={{ color }}>{value}</div>
-              {trend && <div className="summary-trend">↗ {trend}</div>}
+              <div className="summary-value" style={{ color }}>{value || 0}</div>
             </div>
           )}
         </div>
@@ -407,44 +396,113 @@ const AdminDashboard = () => {
     </div>
   );
 
-  const renderNoiseCategoryChart = () => (
+  const renderStatSummaryCard = (title, items, icon, loading) => (
     <div className="card">
       <div className="card-header">
-        <div className="card-title">Top Noise Categories</div>
+        <div className="card-title">
+          <span className="material-icons" style={{ color: '#8B4513' }}>{icon}</span>
+          {title}
+        </div>
       </div>
       <div className="card-content">
         {loading ? (
           <div className="loading-container">
             <div className="loading-spinner large"></div>
           </div>
-        ) : (
-          <div className="chart-container">
-            {data.noiseCategories.map((category, index) => {
-              const total = data.noiseCategories.reduce((sum, cat) => sum + cat.count, 0);
-              const percentage = ((category.count / total) * 100).toFixed(1);
-              return (
-                <div key={index} className="category-item">
-                  <div className="category-info">
-                    <div className="category-color" style={{ backgroundColor: category.color }} />
-                    <div className="category-name">{category.type}</div>
-                  </div>
-                  <div className="category-stats">
-                    <div className="category-count">{category.count}</div>
-                    <div className="category-percent">{percentage}%</div>
+        ) : items && items.length > 0 ? (
+          <div className="stats-list">
+            {items.map((item, index) => (
+              <div key={index} className="stat-item">
+                <div className="stat-info">
+                  {'color' in item && (
+                    <div className="stat-color" style={{ backgroundColor: item.color }} />
+                  )}
+                  <div className="stat-name">
+                    {'level' in item 
+                      ? item.level.charAt(0).toUpperCase() + item.level.slice(1)
+                      : 'type' in item 
+                        ? item.type === 'user' ? 'Regular Users' : 'Admin Users'
+                        : item.status?.replace('_', ' ').charAt(0).toUpperCase() + item.status?.replace('_', ' ').slice(1)
+                    }
                   </div>
                 </div>
-              );
-            })}
+                <div className="stat-stats">
+                  <div className="stat-count">{item.count || 0}</div>
+                  {item.percentage && (
+                    <div className="stat-percent">{item.percentage}%</div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="no-data">
+            <span className="material-icons">info</span>
+            <div>No data available</div>
           </div>
         )}
       </div>
     </div>
   );
 
-  const renderRecentReports = () => (
+  const renderDataTrendCard = (title, data, labels, icon, color, loading) => (
     <div className="card">
       <div className="card-header">
-        <div className="card-title">Recent Reports</div>
+        <div className="card-title">
+          <span className="material-icons" style={{ color: '#8B4513' }}>{icon}</span>
+          {title}
+        </div>
+      </div>
+      <div className="card-content">
+        {loading ? (
+          <div className="loading-container">
+            <div className="loading-spinner large"></div>
+          </div>
+        ) : data && data.length > 0 ? (
+          <div className="trend-summary">
+            <div className="trend-header">
+              <div className="trend-total" style={{ color }}>
+                Total: {data.reduce((sum, val) => sum + (val || 0), 0)}
+              </div>
+              <div className="trend-average">
+                Avg: {Math.round(data.reduce((sum, val) => sum + (val || 0), 0) / data.length)}
+              </div>
+            </div>
+            <div className="trend-items">
+              {data.map((value, index) => (
+                <div key={index} className="trend-item">
+                  <div className="trend-label">{labels?.[index] || `Day ${index + 1}`}</div>
+                  <div className="trend-value" style={{ color }}>{value || 0}</div>
+                  <div className="trend-bar-container">
+                    <div 
+                      className="trend-bar" 
+                      style={{ 
+                        backgroundColor: color,
+                        width: `${Math.min((value / Math.max(...data)) * 100, 100)}%`
+                      }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div className="no-data">
+            <span className="material-icons">info</span>
+            <div>No trend data available</div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
+  const renderRecentActivity = () => (
+    <div className="card">
+      <div className="card-header">
+        <div className="card-title">
+          <span className="material-icons" style={{ color: '#8B4513' }}>timeline</span>
+          Recent Activity
+        </div>
         <button className="view-all-btn">
           <div className="view-all-text">View All</div>
         </button>
@@ -454,184 +512,154 @@ const AdminDashboard = () => {
           <div className="loading-container">
             <div className="loading-spinner large"></div>
           </div>
-        ) : (
-          <div className="reports-list">
-            {data.recentReports.slice(0, 5).map((report, index) => (
-              <div key={report.id} className="report-item">
-                <div className="report-icon">
-                  <span className="material-icons">{getNoiseIcon(report.type)}</span>
+        ) : recentActivity.length > 0 ? (
+          <div className="activity-list">
+            {recentActivity.slice(0, 5).map((activity, index) => (
+              <div key={index} className="activity-item">
+                <div className="activity-icon">
+                  <span className="material-icons">
+                    {activity.action?.includes('Reported') ? 'volume_up' : 
+                     activity.action?.includes('Updated') ? 'edit' :
+                     activity.action?.includes('Registered') ? 'person_add' :
+                     activity.action?.includes('Resolved') ? 'check_circle' : 'notifications'}
+                  </span>
                 </div>
-                <div className="report-info">
-                  <div className="report-header">
-                    <div className="report-type">{report.type.toUpperCase()}</div>
-                    <div className="report-time">{report.time}</div>
+                <div className="activity-info">
+                  <div className="activity-header">
+                    <div className="activity-user">{activity.user || 'Anonymous'}</div>
+                    <div className="activity-time">{activity.time || 'Just now'}</div>
                   </div>
-                  <div className="report-location">{report.location}</div>
-                  <div className="report-reporter">Reported by {report.reporter}</div>
-                </div>
-                <div className="status-badge" style={{ 
-                  backgroundColor: getStatusColor(report.status) + '20',
-                  color: getStatusColor(report.status)
-                }}>
-                  {report.status}
+                  <div className="activity-action">{activity.action || 'Activity'}</div>
+                  {activity.location && <div className="activity-location">{activity.location}</div>}
                 </div>
               </div>
             ))}
+          </div>
+        ) : (
+          <div className="no-data">
+            <span className="material-icons">info</span>
+            <div>No recent activity</div>
           </div>
         )}
       </div>
     </div>
   );
 
-  const renderAlertsAndFlags = () => (
-    <div className="card">
-      <div className="card-header">
-        <div className="card-title">Alerts & Flags</div>
-        <div className="alert-count">
-          <div className="alert-count-text">{data.alerts.length}</div>
-        </div>
-      </div>
-      <div className="card-content">
-        <div className="alerts-list">
-          {data.alerts.map((alert) => (
-            <div key={alert.id} className="alert-item">
-              <div className="alert-indicator" style={{ backgroundColor: getAlertSeverityColor(alert.severity) }} />
-              <div className="alert-content">
-                <div className="alert-header">
-                  <div className="alert-location">{alert.location}</div>
-                  <div className="alert-severity" style={{ color: getAlertSeverityColor(alert.severity) }}>
-                    {alert.severity.toUpperCase()}
-                  </div>
-                </div>
-                <div className="alert-message">{alert.message}</div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-
-  const renderTopNoiseSources = () => (
-    <div className="card">
-      <div className="card-header">
-        <div className="card-title">Top Noise Sources</div>
-      </div>
-      <div className="card-content">
-        <div className="sources-list">
-          {data.topNoiseSources.map((source, index) => (
-            <div key={index} className="source-item">
-              <div className="source-rank">
-                <div className="source-rank-text">{index + 1}</div>
-              </div>
-              <div className="source-info">
-                <div className="source-location">{source.location}</div>
-                <div className="source-reports">{source.reports} reports</div>
-              </div>
-              <div className="level-indicator" style={{ backgroundColor: getReportLevelColor(source.level) }}>
-                <div className="level-text">{source.level}</div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-
-  // Helper functions
-  const getNoiseIcon = (type) => {
-    const icons = {
-      traffic: 'directions_car',
-      music: 'music_note',
-      construction: 'construction',
-      shouting: 'record_voice_over',
-      machinery: 'settings'
-    };
-    return icons[type] || 'volume_up';
-  };
-
-  const getReportLevelColor = (level) => {
-    const colors = {
-      high: '#8B4513',
-      medium: '#DAA520',
-      low: '#D2B48C'
-    };
-    return colors[level] || '#8B7355';
-  };
-
-  const getStatusColor = (status) => {
-    const colors = {
-      pending: '#B8860B',
-      investigating: '#DAA520',
-      resolved: '#8B7355'
-    };
-    return colors[status] || '#8B7355';
-  };
-
-  const getAlertSeverityColor = (severity) => {
-    const colors = {
-      critical: '#8B0000',
-      high: '#B8860B',
-      medium: '#DAA520'
-    };
-    return colors[severity] || '#8B7355';
-  };
-
   const renderDashboard = () => (
     <div className="dashboard-container">
-      {/* Header Actions */}
+      {/* Page Header with Actions */}
       <div className="page-header">
-        <div className="section-title">Noise Monitoring</div>
-        <button
-          className={`btn btn-primary ${exportLoading ? 'btn-disabled' : ''}`}
-          onClick={handleExportReport}
-          disabled={exportLoading || loading}
-        >
-          {exportLoading ? (
-            <div className="loading-spinner small"></div>
-          ) : (
-            <span className="material-icons">download</span>
-          )}
-          <div className="btn-primary-text">
-            {exportLoading ? 'Generating...' : 'Export Report'}
-          </div>
-        </button>
+        <div className="section-title">Admin Dashboard</div>
+        <div className="header-actions">
+          <button
+            className={`btn btn-secondary ${refreshing ? 'btn-disabled' : ''}`}
+            onClick={refreshAnalytics}
+            disabled={refreshing || loading}
+          >
+            {refreshing ? (
+              <div className="loading-spinner small"></div>
+            ) : (
+              <span className="material-icons">refresh</span>
+            )}
+            <div className="btn-secondary-text">
+              {refreshing ? 'Refreshing...' : 'Refresh'}
+            </div>
+          </button>
+          <button
+            className={`btn btn-primary ${exportLoading ? 'btn-disabled' : ''}`}
+            onClick={handleExportReport}
+            disabled={exportLoading || loading}
+          >
+            {exportLoading ? (
+              <div className="loading-spinner small"></div>
+            ) : (
+              <span className="material-icons">download</span>
+            )}
+            <div className="btn-primary-text">
+              {exportLoading ? 'Generating...' : 'Export Report'}
+            </div>
+          </button>
+        </div>
       </div>
-      
-      {/* Summary Cards */}
+
+      {/* Time Period Selector */}
+      <div className="period-selector">
+        <div className="period-content">
+          {periods.map((period) => (
+            <button
+              key={period.id}
+              className={`period-button ${selectedPeriod === period.id ? 'period-button-active' : ''}`}
+              onClick={() => setSelectedPeriod(period.id)}
+              disabled={loading}
+            >
+              {period.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Summary Stats */}
       <div className="summary-grid">
-        {renderSummaryCard('Reports Today', data.reportsToday, 'today', '#DAA520', '+15%', loading)}
-        {renderSummaryCard('Flagged Areas', data.flaggedAreas, 'warning', '#B8860B', null, loading)}
-        {renderSummaryCard('Total Reports', data.totalReports, 'bar_chart', '#8B4513', '+8%', loading)}
-        {renderSummaryCard('Resolved', data.resolvedReports, 'check_circle', '#8B7355', '64%', loading)}
+        {renderSummaryCard('Total Users', userStats?.totalUsers, 'people', '#8B4513', loading)}
+        {renderSummaryCard('Active Users', userStats?.activeUsers, 'person', '#DAA520', loading)}
+        {renderSummaryCard('New Users', userStats?.newUsers, 'person_add', '#B8860B', loading)}
+        {renderSummaryCard('Total Reports', reportStats?.totalReports, 'description', '#8B7355', loading)}
+        {renderSummaryCard('Resolved Reports', reportStats?.reportStatus?.find(r => r.status === 'resolved')?.count, 'check_circle', '#4CAF50', loading)}
+        {renderSummaryCard('High Noise Reports', reportStats?.noiseLevels?.find(n => n.level === 'high')?.count, 'warning', '#F44336', loading)}
       </div>
 
-      {/* Noise Categories Chart */}
-      {renderNoiseCategoryChart()}
+      {/* Statistics Grid */}
+      <div className="stats-grid">
+        <div className="grid-column">
+          {renderStatSummaryCard('User Distribution', userStats?.userByType, 'people', loading)}
+          {renderDataTrendCard(
+            'User Growth Trend', 
+            userStats?.userGrowth, 
+            userStats?.activityLabels, 
+            'trending_up', 
+            '#8B4513', 
+            loading
+          )}
+        </div>
+        
+        <div className="grid-column">
+          {renderStatSummaryCard('Noise Level Distribution', reportStats?.noiseLevels, 'volume_up', loading)}
+          {renderStatSummaryCard('Report Status', reportStats?.reportStatus, 'assignment', loading)}
+        </div>
+        
+        <div className="grid-column">
+          {renderDataTrendCard(
+            'Active Users Trend', 
+            userStats?.userActivity, 
+            userStats?.activityLabels, 
+            'person', 
+            '#DAA520', 
+            loading
+          )}
+          {renderDataTrendCard(
+            'Report Filing Trend', 
+            reportStats?.reportTrend, 
+            reportStats?.trendLabels, 
+            'timeline', 
+            '#8B7355', 
+            loading
+          )}
+        </div>
+      </div>
 
-      {/* Recent Reports */}
-      {renderRecentReports()}
-
-      {/* Top Noise Sources */}
-      {renderTopNoiseSources()}
-
-      {/* Alerts & Flags */}
-      {renderAlertsAndFlags()}
+      {/* Recent Activity */}
+      <div className="recent-activity-section">
+        {renderRecentActivity()}
+      </div>
     </div>
   );
 
-  if (error) {
+  if (loading && !refreshing) {
     return (
       <div className="container">
-        <div className="error-container">
-          <div className="error-card">
-            <span className="material-icons">error</span>
-            <div className="error-title">Unable to load dashboard</div>
-            <div className="error-message">{error}</div>
-            <button className="retry-button" onClick={() => fetchData()}>
-              <div className="retry-button-text">Try Again</div>
-            </button>
-          </div>
+        <div className="loading-container fullscreen">
+          <div className="loading-spinner large"></div>
+          <div className="loading-text">Loading admin dashboard...</div>
         </div>
       </div>
     );
@@ -643,14 +671,24 @@ const AdminDashboard = () => {
       <div className="header">
         <div className="header-content">
           <div className="header-top">
-            <button onClick={openDrawer} className="header-button">
-              <span className="material-icons">menu</span>
-            </button>
+            <div className="header-left">
+              <button onClick={openDrawer} className="header-button">
+                <span className="material-icons">menu</span>
+              </button>
+              <div className="header-welcome">
+                <span className="welcome-text">Welcome back,</span>
+                <span className="admin-name">{adminName}</span>
+              </div>
+              <div className="real-time-clock">
+                <span className="material-icons">schedule</span>
+                <span className="clock-time">{formatTime(currentTime)}</span>
+              </div>
+            </div>
             <div className="header-right">
               <button className="header-button">
                 <span className="material-icons">notifications</span>
                 <div className="notification-badge">
-                  <div className="notification-badge-text">3</div>
+                  <div className="notification-badge-text">{recentActivity.length}</div>
                 </div>
               </button>
               <button onClick={handleLogout} className="header-button">
@@ -659,7 +697,7 @@ const AdminDashboard = () => {
             </div>
           </div>
           <div className="header-title"><h1>NOISEWATCH</h1></div>
-          <div className="header-subtitle">Admin Dashboard</div>
+          <div className="header-subtitle">Admin Dashboard | {formatDate(currentTime)}</div>
         </div>
       </div>
 
@@ -673,7 +711,7 @@ const AdminDashboard = () => {
         <div className="modal-container">
           <div className="overlay" onClick={closeDrawer}></div>
           <div className="drawer-container">
-            <CustomDrawer onClose={closeDrawer} /> {/* Fixed: Using actual CustomDrawer component */}
+            <CustomDrawer onClose={closeDrawer} />
           </div>
         </div>
       )}

@@ -6,6 +6,7 @@ import AdminDashboard from './Admin/AdminDashboard';
 import UserManagement from './Admin/UserManagement';
 import NoiseReports from './Admin/NoiseReports';
 import CustomDrawer from './Admin/CustomDrawer';
+import Analytics from './Admin/Analytics';
 import './App.css';
 
 function App() {
@@ -20,6 +21,7 @@ function App() {
           <Route path="/admin/users" element={<UserManagement />} />
           <Route path="/admin/reports" element={<NoiseReports />} />
           <Route path="/admin/drawer" element={<CustomDrawer />} />
+          <Route path="/admin/analytics" element={<Analytics />} />
         </Routes>
       </div>
     </Router>
