@@ -14,7 +14,7 @@ const NoiseReports = ({ navigation }) => {
   const [selectedStatus, setSelectedStatus] = useState(null);
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [statusModalVisible, setStatusModalVisible] = useState(false);
-  const audioRef = useRef(null);
+  const audioRef = useRef(new Audio());
   const videoRefs = useRef({});
   const [audioProgress, setAudioProgress] = useState({});
   const [audioDuration, setAudioDuration] = useState({});
@@ -26,12 +26,59 @@ const NoiseReports = ({ navigation }) => {
 
   useEffect(() => {
     fetchReports();
-    return () => {
-      // Clean up audio
-      if (audioRef.current) {
-        audioRef.current.pause();
-        audioRef.current.src = '';
+    
+    // Set up audio event listeners
+    const audio = audioRef.current;
+    audio.preload = 'metadata';
+    audio.crossOrigin = 'anonymous';
+
+    const handleTimeUpdate = () => {
+      if (playingAudio) {
+        setAudioProgress(prev => ({
+          ...prev,
+          [playingAudio]: audio.currentTime
+        }));
       }
+    };
+
+    const handleLoadedMetadata = () => {
+      if (playingAudio) {
+        setAudioDuration(prev => ({
+          ...prev,
+          [playingAudio]: audio.duration
+        }));
+      }
+    };
+
+    const handleEnded = () => {
+      setPlayingAudio(null);
+      if (playingAudio) {
+        setAudioProgress(prev => ({
+          ...prev,
+          [playingAudio]: 0
+        }));
+      }
+    };
+
+    const handleError = (e) => {
+      console.error('Audio error:', e);
+      console.error('Audio error details:', audio.error);
+      setPlayingAudio(null);
+    };
+
+    audio.addEventListener('timeupdate', handleTimeUpdate);
+    audio.addEventListener('loadedmetadata', handleLoadedMetadata);
+    audio.addEventListener('ended', handleEnded);
+    audio.addEventListener('error', handleError);
+
+    return () => {
+      audio.pause();
+      audio.src = '';
+      audio.removeEventListener('timeupdate', handleTimeUpdate);
+      audio.removeEventListener('loadedmetadata', handleLoadedMetadata);
+      audio.removeEventListener('ended', handleEnded);
+      audio.removeEventListener('error', handleError);
+      
       // Clean up all video elements
       Object.values(videoRefs.current).forEach(video => {
         if (video) {
@@ -216,144 +263,143 @@ const NoiseReports = ({ navigation }) => {
   };
 
   const playAudio = async (audioUri, reportId) => {
-    try {
-      console.log('🎵 Attempting to play audio for report:', reportId);
-      console.log('🔗 Audio URL:', audioUri);
-      
-      // If clicking the same audio that's playing, pause it
-      if (playingAudio === reportId && audioRef.current) {
-        console.log('⏸️ Pausing current audio');
-        audioRef.current.pause();
-        setPlayingAudio(null);
-        return;
-      }
-      
-      // Stop any currently playing audio
-      if (audioRef.current) {
-        audioRef.current.pause();
-        audioRef.current.src = '';
-      }
-
-      // Test if URL is accessible
-      console.log('🔍 Testing URL accessibility...');
-      try {
-        const testResponse = await fetch(audioUri, { method: 'HEAD' });
-        console.log('✅ URL accessible:', testResponse.status);
-      } catch (fetchError) {
-        console.warn('⚠️ URL might not be directly accessible:', fetchError.message);
-      }
-
-      // Create new audio element
-      const newAudio = new Audio();
-      audioRef.current = newAudio;
-      
-      // Set up event listeners
-      newAudio.addEventListener('error', (e) => {
-        console.error('❌ Audio error event:', e);
-        console.error('Audio error code:', newAudio.error?.code);
-        console.error('Audio error message:', newAudio.error?.message);
-        alert('Could not play audio. The audio file might be corrupted or inaccessible.');
-        setPlayingAudio(null);
-      });
-
-      newAudio.addEventListener('loadedmetadata', () => {
-        console.log('✅ Audio metadata loaded, duration:', newAudio.duration);
-        setAudioDuration(prev => ({
-          ...prev,
-          [reportId]: newAudio.duration
-        }));
-      });
-
-      newAudio.addEventListener('timeupdate', () => {
-        setAudioProgress(prev => ({
-          ...prev,
-          [reportId]: newAudio.currentTime
-        }));
-      });
-
-      newAudio.addEventListener('canplay', () => {
-        console.log('✅ Audio can play now');
-      });
-
-      newAudio.addEventListener('canplaythrough', () => {
-        console.log('✅ Audio can play through without buffering');
-      });
-
-      newAudio.addEventListener('ended', () => {
-        console.log('⏹️ Audio ended');
-        setPlayingAudio(null);
-        setAudioProgress(prev => ({
-          ...prev,
-          [reportId]: 0
-        }));
-      });
-
-      // Set audio properties
-      newAudio.crossOrigin = 'anonymous';
-      newAudio.preload = 'metadata';
-      newAudio.src = audioUri;
-      
-      console.log('🔧 Audio element setup complete, attempting to load...');
-      
-      // Try to load first, then play
-      try {
-        await newAudio.load();
-        console.log('✅ Audio loaded successfully');
-        
-        // Give browser time to process
-        await new Promise(resolve => setTimeout(resolve, 100));
-        
-        console.log('▶️ Attempting playback...');
-        await newAudio.play();
-        console.log('✅ Audio playing successfully');
-        setPlayingAudio(reportId);
-        
-      } catch (playError) {
-        console.error('❌ Play error:', playError);
-        
-        if (playError.name === 'NotAllowedError') {
-          console.warn('⚠️ Autoplay prevented, trying with user interaction...');
-          // Try again with user interaction
-          const playPromise = newAudio.play();
-          if (playPromise !== undefined) {
-            playPromise.catch(err => {
-              console.error('❌ Second play attempt failed:', err);
-              alert('Please click the play button again to start audio playback.');
-            });
-          }
-        } else if (playError.name === 'NotSupportedError') {
-          alert('Audio format not supported. Please check if the audio file is in a supported format (MP3, WAV, OGG).');
-        } else {
-          alert('Could not play audio: ' + playError.message);
-        }
-        setPlayingAudio(null);
-      }
-    } catch (error) {
-      console.error('❌ Error in playAudio function:', error);
-      alert('Could not play audio. Please check the audio file URL.');
-      setPlayingAudio(null);
-    }
-  };
-
-  const pauseAudio = () => {
-    if (audioRef.current) {
+  try {
+    console.log('🎵 Attempting to play audio for report:', reportId);
+    console.log('🔗 Original Cloudinary URL:', audioUri);
+    
+    // If clicking the same audio that's playing, pause it
+    if (playingAudio === reportId && audioRef.current) {
+      console.log('⏸️ Pausing current audio');
       audioRef.current.pause();
       setPlayingAudio(null);
-      console.log('⏸️ Audio paused');
+      return;
     }
-  };
+    
+    // Stop any currently playing audio
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.src = '';
+    }
+
+    // ✅ FIX: Ensure Cloudinary URL has .mp3 extension
+    let processedUrl = audioUri;
+    
+    // If URL doesn't end with .mp3, add it
+    if (!processedUrl.match(/\.(mp3|wav|ogg)$/i)) {
+      // For Cloudinary URLs, ensure .mp3 extension
+      processedUrl = processedUrl.replace(/(\.[^.]+)?$/, '.mp3');
+    }
+    
+    // If Cloudinary URL doesn't have /video/upload/, replace with it
+    if (processedUrl.includes('cloudinary.com') && !processedUrl.includes('/video/upload/')) {
+      processedUrl = processedUrl.replace(/\/(image|raw)\/upload\//, '/video/upload/');
+    }
+    
+    console.log('🔗 Processed URL:', processedUrl);
+
+    // Create new audio element
+    const newAudio = new Audio();
+    audioRef.current = newAudio;
+    
+    // Set up event listeners BEFORE setting src
+    newAudio.addEventListener('error', (e) => {
+      console.error('❌ Audio error event:', e);
+      console.error('Audio error code:', newAudio.error?.code);
+      console.error('Audio error message:', newAudio.error?.message);
+      console.error('Failed URL:', processedUrl);
+      
+      // Show specific error messages
+      let errorMsg = 'Could not play audio. ';
+      switch(newAudio.error?.code) {
+        case 1: errorMsg += 'Loading was aborted.'; break;
+        case 2: errorMsg += 'Network error.'; break;
+        case 3: errorMsg += 'Decoding failed.'; break;
+        case 4: errorMsg += 'Format not supported.'; break;
+        default: errorMsg += 'Unknown error.';
+      }
+      
+      alert(errorMsg + '\n\nTrying alternative format...');
+      
+      // Try alternative format
+      const altUrl = processedUrl.replace('.mp3', '.wav');
+      console.log('🔄 Trying alternative URL:', altUrl);
+      newAudio.src = altUrl;
+      
+      setPlayingAudio(null);
+    });
+
+    newAudio.addEventListener('loadedmetadata', () => {
+      console.log('✅ Audio metadata loaded, duration:', newAudio.duration);
+      setAudioDuration(prev => ({
+        ...prev,
+        [reportId]: newAudio.duration
+      }));
+    });
+
+    newAudio.addEventListener('timeupdate', () => {
+      setAudioProgress(prev => ({
+        ...prev,
+        [reportId]: newAudio.currentTime
+      }));
+    });
+
+    newAudio.addEventListener('ended', () => {
+      console.log('⏹️ Audio ended');
+      setPlayingAudio(null);
+      setAudioProgress(prev => ({
+        ...prev,
+        [reportId]: 0
+      }));
+    });
+
+    // Set audio properties
+    newAudio.crossOrigin = 'anonymous';
+    newAudio.preload = 'metadata';
+    
+    // Set the source
+    newAudio.src = processedUrl;
+    
+    console.log('🔧 Audio element setup complete, attempting to load...');
+    
+    // Load and play
+    try {
+      await newAudio.load();
+      console.log('✅ Audio loaded successfully');
+      
+      await newAudio.play();
+      console.log('✅ Audio playing successfully');
+      setPlayingAudio(reportId);
+      
+    } catch (playError) {
+      console.error('❌ Play error:', playError);
+      
+      if (playError.name === 'NotSupportedError') {
+        alert('Audio format not supported by your browser. The file may need to be re-encoded.\n\nURL: ' + processedUrl);
+      } else if (playError.name === 'NotAllowedError') {
+        alert('Autoplay was blocked. Please click play again.');
+      } else {
+        alert('Could not play audio: ' + playError.message);
+      }
+      setPlayingAudio(null);
+    }
+  } catch (error) {
+    console.error('❌ Error in playAudio function:', error);
+    alert('Could not play audio. Please check console for details.');
+    setPlayingAudio(null);
+  }
+};
 
   const handleAudioProgress = (reportId, value) => {
-    if (audioRef.current && playingAudio === reportId) {
-      const duration = audioDuration[reportId] || 0;
-      if (duration > 0) {
-        const newTime = (value / 100) * duration;
-        audioRef.current.currentTime = newTime;
-        setAudioProgress(prev => ({
-          ...prev,
-          [reportId]: newTime
-        }));
-      }
+    const audio = audioRef.current;
+    const duration = audioDuration[reportId] || 0;
+    
+    if (duration > 0 && audio) {
+      const newTime = (value / 100) * duration;
+      audio.currentTime = newTime;
+      setAudioProgress(prev => ({
+        ...prev,
+        [reportId]: newTime
+      }));
     }
   };
 
@@ -486,8 +532,25 @@ const NoiseReports = ({ navigation }) => {
     console.log('URL Length:', url?.length);
     if (url?.includes('cloudinary.com')) {
       console.log('☁️ Cloudinary URL detected');
-      console.log('URL parts:', url.split('/'));
+      const parts = url.split('/');
+      console.log('Domain:', parts[2]);
+      console.log('Resource type:', parts[5]);
+      console.log('File path:', parts.slice(6).join('/'));
     }
+  };
+
+  // Add this function to transform Cloudinary URLs for audio
+  const transformAudioUrl = (url) => {
+    if (!url) return url;
+    
+    // If it's a Cloudinary URL, make sure it's using HTTPS
+    if (url.includes('cloudinary.com')) {
+      const urlObj = new URL(url);
+      urlObj.protocol = 'https:';
+      return urlObj.toString();
+    }
+    
+    return url;
   };
 
   // Render media based on mediaType
@@ -500,6 +563,7 @@ const NoiseReports = ({ navigation }) => {
       const currentTime = audioProgress[report._id] || 0;
       const duration = audioDuration[report._id] || 0;
       const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
+      const audioUrl = transformAudioUrl(report.mediaUrl);
 
       return (
         <div className="detail-section">
@@ -524,9 +588,9 @@ const NoiseReports = ({ navigation }) => {
                   className="play-pause-button"
                   onClick={(e) => {
                     e.stopPropagation();
-                    playAudio(report.mediaUrl, report._id);
+                    playAudio(audioUrl, report._id);
                   }}
-                  disabled={!report.mediaUrl}
+                  disabled={!audioUrl}
                 >
                   <span className="material-icons">
                     {playingAudio === report._id ? "pause" : "play_arrow"}
@@ -545,7 +609,7 @@ const NoiseReports = ({ navigation }) => {
                     value={progressPercent}
                     onChange={(e) => handleAudioProgress(report._id, parseFloat(e.target.value))}
                     className="progress-bar"
-                    disabled={!report.mediaUrl || playingAudio !== report._id}
+                    disabled={!audioUrl || playingAudio !== report._id}
                   />
                 </div>
               </div>
@@ -559,11 +623,11 @@ const NoiseReports = ({ navigation }) => {
               </div>
               {process.env.NODE_ENV === 'development' && (
                 <div className="debug-info">
-                  <small>URL: {report.mediaUrl?.substring(0, 50)}...</small>
+                  <small>URL: {audioUrl?.substring(0, 50)}...</small>
                   <button 
                     onClick={(e) => {
                       e.stopPropagation();
-                      debugMediaUrl(report.mediaUrl);
+                      debugMediaUrl(audioUrl);
                     }}
                     className="debug-button-small"
                   >

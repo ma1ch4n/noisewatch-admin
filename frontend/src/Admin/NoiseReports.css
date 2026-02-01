@@ -260,9 +260,22 @@
   flex: 1;
 }
 
+/* FIXED: Sound icon alignment */
 .report-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   font-size: 32px;
+  width: 48px; /* Fixed width for consistent alignment */
+  height: 48px; /* Fixed height for consistent alignment */
   flex-shrink: 0;
+  text-align: center;
+  line-height: 1;
+}
+
+.report-icon span {
+  display: inline-block;
+  vertical-align: middle;
 }
 
 .report-header-text {
@@ -559,6 +572,9 @@
 .media-type-badge .material-icons {
   font-size: 18px;
   color: #8B4513;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .cloudinary-badge {
@@ -580,7 +596,7 @@
   border: 1px solid rgba(25, 118, 210, 0.2);
 }
 
-/* Audio Player */
+/* Audio Player - FIXED ALIGNMENT */
 .audio-player {
   width: 100%;
 }
@@ -604,6 +620,7 @@
   cursor: pointer;
   transition: all 0.3s ease;
   flex-shrink: 0;
+  padding: 0; /* Ensure no extra padding */
 }
 
 .play-pause-button:hover:not(:disabled) {
@@ -619,6 +636,11 @@
 
 .play-pause-button .material-icons {
   font-size: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  margin: 0; /* Remove any margins */
 }
 
 .progress-container {
@@ -685,6 +707,13 @@
 .progress-bar:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* Audio Progress Container - Improved Alignment */
+.audio-player .progress-container {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
 }
 
 /* Video Player */
@@ -766,6 +795,9 @@
 
 .fullscreen-button .material-icons {
   font-size: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 /* Media Info */
@@ -915,6 +947,9 @@
   padding: 8px;
   border-radius: 50%;
   transition: all 0.3s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .status-modal-close:hover {
@@ -987,6 +1022,9 @@
 
 .status-option-icon {
   font-size: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .status-option-label {
@@ -1136,6 +1174,8 @@
   
   .report-icon {
     font-size: 28px;
+    width: 40px;
+    height: 40px;
   }
   
   .video-element {
@@ -1299,4 +1339,36 @@ video:-ms-fullscreen {
   width: 100vw !important;
   height: 100vh !important;
   object-fit: contain !important;
+}
+
+/* Additional alignment fixes for sound icons */
+.icon-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.audio-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  vertical-align: middle;
+}
+
+/* Ensure all material icons are properly aligned */
+.material-icons.align-fixed {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  vertical-align: middle;
+}
+
+/* Fix for sound emoji alignment */
+.report-icon[role="img"] {
+  font-size: 32px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
