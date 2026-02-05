@@ -185,6 +185,8 @@ router.get('/getAllUsersOnly', async (req, res) => {
   }
 });
 
+
+
 // Deactivate/Activate user
 router.put('/toggle-status/:id', authenticate, async (req, res) => {
   try {
@@ -241,9 +243,6 @@ router.put('/toggle-status/:id', authenticate, async (req, res) => {
     });
   }
 });
-
-
-
 
 
 module.exports = router;

@@ -64,7 +64,6 @@ const noiseReportSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now }
 });
-
 // Auto-update timestamp
 noiseReportSchema.pre("save", function (next) {
   this.updatedAt = Date.now();
