@@ -4,15 +4,20 @@ import CustomDrawer from './CustomDrawer';
 
 const AdminDashboard = () => {
   const [drawerVisible, setDrawerVisible] = useState(false);
+  const [notificationModalVisible, setNotificationModalVisible] = useState(false);
   const [loading, setLoading] = useState(true);
   const [selectedPeriod, setSelectedPeriod] = useState('weekly');
   const [userStats, setUserStats] = useState(null);
   const [reportStats, setReportStats] = useState(null);
   const [recentActivity, setRecentActivity] = useState([]);
+  const [recentReports, setRecentReports] = useState([]);
+  const [recentUsers, setRecentUsers] = useState([]);
   const [exportLoading, setExportLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
   const [adminName, setAdminName] = useState('');
+  const [notifications, setNotifications] = useState([]);
+  const [unreadNotifications, setUnreadNotifications] = useState(0);
 
   // API endpoint
   const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
@@ -22,10 +27,12 @@ const AdminDashboard = () => {
     const storedAdmin = localStorage.getItem('adminName') || 'Administrator';
     setAdminName(storedAdmin);
     
-    fetchAnalytics();
+    fetchAllData();
     
     // Set up polling to refresh data every 30 seconds
-    const interval = setInterval(() => fetchAnalytics(true), 30000);
+    const interval = setInterval(() => {
+      fetchAllData(true);
+    }, 30000);
     
     // Update clock every second
     const clockInterval = setInterval(() => {
@@ -38,7 +45,7 @@ const AdminDashboard = () => {
     };
   }, [selectedPeriod]);
 
-  const fetchAnalytics = async (isRefresh = false) => {
+  const fetchAllData = async (isRefresh = false) => {
     try {
       if (isRefresh) {
         setRefreshing(true);
@@ -46,13 +53,15 @@ const AdminDashboard = () => {
         setLoading(true);
       }
       
-      console.log('📊 Fetching analytics...');
+      console.log('📊 Fetching all data...');
       
       // Fetch all data in parallel
-      const [userResponse, reportResponse, activityResponse] = await Promise.all([
+      const [userResponse, reportResponse, activityResponse, reportsResponse, usersResponse] = await Promise.all([
         fetch(`${API_BASE_URL}/analytics/users?period=${selectedPeriod}`),
         fetch(`${API_BASE_URL}/analytics/reports?period=${selectedPeriod}`),
-        fetch(`${API_BASE_URL}/analytics/recent-activity`)
+        fetch(`${API_BASE_URL}/analytics/recent-activity`),
+        fetch(`${API_BASE_URL}/reports/recent`),
+        fetch(`${API_BASE_URL}/users/recent`)
       ]);
 
       if (!userResponse.ok) throw new Error('Failed to fetch user analytics');
@@ -62,16 +71,305 @@ const AdminDashboard = () => {
       const userData = await userResponse.json();
       const reportData = await reportResponse.json();
       const activityData = await activityResponse.json();
+      const reportsData = reportsResponse.ok ? await reportsResponse.json() : { success: false };
+      const usersData = usersResponse.ok ? await usersResponse.json() : { success: false };
       
       setUserStats(userData);
       setReportStats(reportData);
       setRecentActivity(activityData);
       
+      if (reportsData.success) {
+        setRecentReports(reportsData.reports || []);
+      }
+      
+      if (usersData.success) {
+        setRecentUsers(usersData.users || []);
+      }
+      
+      // Generate notifications from real data
+      generateNotificationsFromData(activityData, reportsData, usersData);
+      
     } catch (error) {
-      console.error('Error fetching analytics:', error);
+      console.error('Error fetching data:', error);
+      // Generate notifications from available data
+      generateNotificationsFromData(recentActivity, { success: false }, { success: false });
     } finally {
       setLoading(false);
       setRefreshing(false);
+    }
+  };
+
+  const generateNotificationsFromData = (activityData, reportsData, usersData) => {
+    const newNotifications = [];
+    
+    // Generate notifications from recent reports (from database)
+    if (reportsData.success && reportsData.reports && reportsData.reports.length > 0) {
+      const recentReportsList = reportsData.reports.slice(0, 5); // Get latest 5 reports
+      
+      recentReportsList.forEach((report, index) => {
+        const timeAgo = calculateTimeAgo(report.createdAt || report.timestamp || new Date().toISOString());
+        
+        let priority = 'medium';
+        if (report.priority === 'high' || report.severity === 'high' || report.noiseLevel === 'high') {
+          priority = 'high';
+        } else if (report.priority === 'emergency' || report.severity === 'critical') {
+          priority = 'emergency';
+        } else if (report.priority === 'low' || report.noiseLevel === 'low') {
+          priority = 'low';
+        }
+
+        newNotifications.push({
+          id: `report-${report._id || report.id || index}`,
+          type: 'report',
+          title: 'New Noise Report',
+          message: `Report #${report.reportId || report._id?.slice(-6) || index + 1}: ${report.description || 'Noise complaint'} at ${report.location || 'Unknown location'}`,
+          time: timeAgo,
+          read: false,
+          priority: priority,
+          data: report,
+          category: 'report'
+        });
+      });
+    }
+
+    // Generate notifications from recent users (from database)
+    if (usersData.success && usersData.users && usersData.users.length > 0) {
+      const recentUsersList = usersData.users.slice(0, 3); // Get latest 3 users
+      
+      recentUsersList.forEach((user, index) => {
+        const timeAgo = calculateTimeAgo(user.createdAt || user.registeredAt || new Date().toISOString());
+        
+        newNotifications.push({
+          id: `user-${user._id || user.id || index}`,
+          type: 'user',
+          title: 'New User Registered',
+          message: `New ${user.userType === 'admin' ? 'Administrator' : 'User'}: ${user.username || user.email || 'New user'} has joined the system`,
+          time: timeAgo,
+          read: false,
+          priority: 'medium',
+          data: user,
+          category: 'user'
+        });
+      });
+    }
+
+    // Generate notifications from recent activities
+    if (activityData && activityData.length > 0) {
+      const recentActivities = activityData.slice(0, 5); // Get latest 5 activities
+      
+      recentActivities.forEach((activity, index) => {
+        const timeAgo = activity.time || calculateTimeAgo(activity.timestamp || new Date().toISOString());
+        
+        let type = 'activity';
+        let priority = 'low';
+        
+        if (activity.action?.includes('Reported')) {
+          type = 'report';
+          priority = 'medium';
+        } else if (activity.action?.includes('Registered')) {
+          type = 'user';
+          priority = 'medium';
+        } else if (activity.action?.includes('Resolved')) {
+          type = 'system';
+          priority = 'low';
+        } else if (activity.action?.includes('Emergency') || activity.action?.includes('Critical')) {
+          type = 'emergency';
+          priority = 'emergency';
+        }
+
+        newNotifications.push({
+          id: `activity-${index}`,
+          type: type,
+          title: 'System Activity',
+          message: activity.action || 'Activity recorded',
+          time: timeAgo,
+          read: false,
+          priority: priority,
+          data: activity,
+          category: 'activity'
+        });
+      });
+    }
+
+    // Add system notifications (for demo purposes)
+    const systemNotifications = [
+      {
+        id: 'system-1',
+        type: 'system',
+        title: 'System Status',
+        message: 'All systems are operational',
+        time: '1 hour ago',
+        read: true,
+        priority: 'low',
+        category: 'system'
+      },
+      {
+        id: 'system-2',
+        type: 'system',
+        title: 'Database Update',
+        message: 'Nightly backup completed successfully',
+        time: '2 hours ago',
+        read: true,
+        priority: 'low',
+        category: 'system'
+      }
+    ];
+
+    // Merge all notifications
+    const allNotifications = [...newNotifications, ...systemNotifications];
+    
+    // Sort by time (newest first)
+    allNotifications.sort((a, b) => {
+      const timeA = getTimeValue(a.time);
+      const timeB = getTimeValue(b.time);
+      return timeB - timeA;
+    });
+    
+    setNotifications(allNotifications);
+    
+    // Count unread notifications
+    const unreadCount = allNotifications.filter(n => !n.read).length;
+    setUnreadNotifications(unreadCount);
+    
+    // Store notifications in localStorage for persistence
+    localStorage.setItem('notifications', JSON.stringify({
+      notifications: allNotifications,
+      lastUpdated: new Date().toISOString()
+    }));
+  };
+
+  const calculateTimeAgo = (timestamp) => {
+    const now = new Date();
+    const date = new Date(timestamp);
+    const diffInSeconds = Math.floor((now - date) / 1000);
+    
+    if (diffInSeconds < 60) return 'Just now';
+    if (diffInSeconds < 3600) return `${Math.floor(diffInSeconds / 60)} minutes ago`;
+    if (diffInSeconds < 86400) return `${Math.floor(diffInSeconds / 3600)} hours ago`;
+    if (diffInSeconds < 604800) return `${Math.floor(diffInSeconds / 86400)} days ago`;
+    return `${Math.floor(diffInSeconds / 604800)} weeks ago`;
+  };
+
+  const getTimeValue = (timeString) => {
+    if (!timeString) return 0;
+    
+    const now = new Date();
+    if (timeString === 'Just now') return now.getTime();
+    
+    const match = timeString.match(/(\d+)\s*(minute|hour|day|week)s?\s*ago/);
+    if (!match) return 0;
+    
+    const [, amount, unit] = match;
+    const amountNum = parseInt(amount);
+    
+    switch(unit) {
+      case 'minute':
+        return now.getTime() - amountNum * 60 * 1000;
+      case 'hour':
+        return now.getTime() - amountNum * 60 * 60 * 1000;
+      case 'day':
+        return now.getTime() - amountNum * 24 * 60 * 60 * 1000;
+      case 'week':
+        return now.getTime() - amountNum * 7 * 24 * 60 * 60 * 1000;
+      default:
+        return 0;
+    }
+  };
+
+  const markAllAsRead = () => {
+    const updatedNotifications = notifications.map(notification => ({
+      ...notification,
+      read: true
+    }));
+    setNotifications(updatedNotifications);
+    setUnreadNotifications(0);
+    
+    // Update localStorage
+    localStorage.setItem('notifications', JSON.stringify({
+      notifications: updatedNotifications,
+      lastUpdated: new Date().toISOString()
+    }));
+  };
+
+  const markAsRead = (id) => {
+    const updatedNotifications = notifications.map(notification => 
+      notification.id === id ? { ...notification, read: true } : notification
+    );
+    setNotifications(updatedNotifications);
+    setUnreadNotifications(prev => Math.max(0, prev - 1));
+    
+    // Update localStorage
+    localStorage.setItem('notifications', JSON.stringify({
+      notifications: updatedNotifications,
+      lastUpdated: new Date().toISOString()
+    }));
+  };
+
+  const clearAllNotifications = () => {
+    if (window.confirm('Are you sure you want to clear all notifications?')) {
+      setNotifications([]);
+      setUnreadNotifications(0);
+      
+      // Update localStorage
+      localStorage.setItem('notifications', JSON.stringify({
+        notifications: [],
+        lastUpdated: new Date().toISOString()
+      }));
+    }
+  };
+
+  const getNotificationIcon = (type) => {
+    switch(type) {
+      case 'report':
+        return '📢';
+      case 'user':
+        return '👤';
+      case 'system':
+        return '⚙️';
+      case 'activity':
+        return '📈';
+      case 'emergency':
+        return '🚨';
+      default:
+        return '📋';
+    }
+  };
+
+  const getPriorityColor = (priority) => {
+    switch(priority) {
+      case 'emergency':
+        return '#ff4444';
+      case 'high':
+        return '#ff8c00';
+      case 'medium':
+        return '#ffaa00';
+      case 'low':
+        return '#4CAF50';
+      default:
+        return '#8B7355';
+    }
+  };
+
+  const handleNotificationClick = (notification) => {
+    // Mark as read when clicked
+    markAsRead(notification.id);
+    
+    // Navigate based on notification type
+    switch(notification.category) {
+      case 'report':
+        // Navigate to reports page or specific report
+        alert(`Opening report: ${notification.data?.reportId || notification.data?._id}`);
+        // You can implement navigation here
+        // window.location.href = `/admin/reports/${notification.data?._id}`;
+        break;
+      case 'user':
+        // Navigate to users page or specific user
+        alert(`Opening user profile: ${notification.data?.username || notification.data?.email}`);
+        // window.location.href = `/admin/users/${notification.data?._id}`;
+        break;
+      default:
+        // For other notifications, just close modal
+        break;
     }
   };
 
@@ -340,6 +638,14 @@ const AdminDashboard = () => {
     setDrawerVisible(false);
   };
 
+  const toggleNotificationModal = () => {
+    setNotificationModalVisible(!notificationModalVisible);
+    if (!notificationModalVisible) {
+      // Mark all as read when opening notification modal
+      markAllAsRead();
+    }
+  };
+
   const handleLogout = async () => {
     if (window.confirm('Are you sure you want to logout?')) {
       localStorage.clear();
@@ -348,7 +654,7 @@ const AdminDashboard = () => {
   };
 
   const refreshAnalytics = () => {
-    fetchAnalytics(true);
+    fetchAllData(true);
   };
 
   const periods = [
@@ -685,11 +991,18 @@ const AdminDashboard = () => {
               </div>
             </div>
             <div className="header-right">
-              <button className="header-button">
+              <button 
+                onClick={toggleNotificationModal} 
+                className="header-button notification-button"
+              >
                 <span className="material-icons">notifications</span>
-                <div className="notification-badge">
-                  <div className="notification-badge-text">{recentActivity.length}</div>
-                </div>
+                {unreadNotifications > 0 && (
+                  <div className="notification-badge">
+                    <div className="notification-badge-text">
+                      {unreadNotifications > 99 ? '99+' : unreadNotifications}
+                    </div>
+                  </div>
+                )}
               </button>
               <button onClick={handleLogout} className="header-button">
                 <span className="material-icons">logout</span>
@@ -705,6 +1018,121 @@ const AdminDashboard = () => {
       <div className="content">
         {renderDashboard()}
       </div>
+
+      {/* Notification Modal */}
+      {notificationModalVisible && (
+        <div className="notification-modal-overlay" onClick={() => setNotificationModalVisible(false)}>
+          <div className="notification-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="notification-modal-header">
+              <h2 className="notification-modal-title">Notifications</h2>
+              <div className="notification-modal-actions">
+                <button 
+                  className="notification-action-btn mark-read-btn"
+                  onClick={markAllAsRead}
+                  disabled={unreadNotifications === 0}
+                >
+                  <span className="material-icons">check</span>
+                  <span>Mark all as read</span>
+                </button>
+                <button 
+                  className="notification-action-btn clear-btn"
+                  onClick={clearAllNotifications}
+                  disabled={notifications.length === 0}
+                >
+                  <span className="material-icons">delete</span>
+                  <span>Clear all</span>
+                </button>
+                <button 
+                  className="notification-close-btn"
+                  onClick={() => setNotificationModalVisible(false)}
+                >
+                  <span className="material-icons">close</span>
+                </button>
+              </div>
+            </div>
+            
+            <div className="notification-modal-content">
+              {notifications.length > 0 ? (
+                <div className="notification-list">
+                  {notifications.map((notification) => (
+                    <div 
+                      key={notification.id} 
+                      className={`notification-item ${notification.read ? 'read' : 'unread'}`}
+                      onClick={() => handleNotificationClick(notification)}
+                    >
+                      <div className="notification-icon" style={{ 
+                        backgroundColor: `${getPriorityColor(notification.priority)}20`,
+                        color: getPriorityColor(notification.priority)
+                      }}>
+                        {getNotificationIcon(notification.type)}
+                      </div>
+                      <div className="notification-content">
+                        <div className="notification-header">
+                          <h3 className="notification-title">{notification.title}</h3>
+                          <span className="notification-time">{notification.time}</span>
+                        </div>
+                        <p className="notification-message">{notification.message}</p>
+                        <div className="notification-tags">
+                          <span className="notification-tag" style={{ 
+                            backgroundColor: getPriorityColor(notification.priority),
+                            color: 'white'
+                          }}>
+                            {notification.priority.charAt(0).toUpperCase() + notification.priority.slice(1)}
+                          </span>
+                          <span className="notification-tag">
+                            {notification.category?.charAt(0).toUpperCase() + notification.category?.slice(1)}
+                          </span>
+                          {notification.data?.noiseLevel && (
+                            <span className="notification-tag noise-level-tag">
+                              {notification.data.noiseLevel.toUpperCase()}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      {!notification.read && (
+                        <div className="notification-unread-indicator"></div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="no-notifications">
+                  <span className="material-icons large">notifications_off</span>
+                  <h3>No notifications</h3>
+                  <p>You're all caught up! Check back later for updates.</p>
+                </div>
+              )}
+            </div>
+            
+            <div className="notification-modal-footer">
+              <div className="notification-stats">
+                <span className="stat-item">
+                  <span className="stat-number">{unreadNotifications}</span>
+                  <span className="stat-label">Unread</span>
+                </span>
+                <span className="stat-divider">•</span>
+                <span className="stat-item">
+                  <span className="stat-number">{notifications.length}</span>
+                  <span className="stat-label">Total</span>
+                </span>
+                <span className="stat-divider">•</span>
+                <span className="stat-item">
+                  <span className="stat-number">
+                    {notifications.filter(n => n.category === 'report').length}
+                  </span>
+                  <span className="stat-label">Reports</span>
+                </span>
+              </div>
+              <button 
+                className="notification-close-footer-btn"
+                onClick={() => setNotificationModalVisible(false)}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Custom Drawer */}
       {drawerVisible && (

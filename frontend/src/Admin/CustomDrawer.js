@@ -298,7 +298,7 @@ const CustomDrawer = ({ onClose }) => {
 
           <button 
             className="profile-section"
-            onClick={() => handleNavigation('/profile')}
+            onClick={() => handleNavigation('/admin/profile')}
           >
             <img
               src={user.profilePhoto || '/default-profile.png'}
