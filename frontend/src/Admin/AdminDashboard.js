@@ -1,662 +1,46 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import './AdminDashboard.css';
 import CustomDrawer from './CustomDrawer';
+
+// Import Chart.js properly
+import { Chart, registerables } from 'chart.js';
+Chart.register(...registerables);
 
 const AdminDashboard = () => {
   const [drawerVisible, setDrawerVisible] = useState(false);
   const [notificationModalVisible, setNotificationModalVisible] = useState(false);
+  const [activityModalVisible, setActivityModalVisible] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [selectedPeriod, setSelectedPeriod] = useState('weekly');
-  const [userStats, setUserStats] = useState(null);
-  const [reportStats, setReportStats] = useState(null);
-  const [recentActivity, setRecentActivity] = useState([]);
-  const [recentReports, setRecentReports] = useState([]);
-  const [recentUsers, setRecentUsers] = useState([]);
-  const [exportLoading, setExportLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
   const [adminName, setAdminName] = useState('');
+  
+  // Data states - using dashboardData from new analytics route
+  const [dashboardData, setDashboardData] = useState(null);
+  const [recentActivity, setRecentActivity] = useState([]);
   const [notifications, setNotifications] = useState([]);
   const [unreadNotifications, setUnreadNotifications] = useState(0);
+  const [fetchError, setFetchError] = useState(null);
+  const [apiConnected, setApiConnected] = useState(false);
+  const [selectedPeriod, setSelectedPeriod] = useState('weekly');
 
-  // API endpoint
+  // Chart refs
+  const noiseLevelChartRef = useRef(null);
+  const reportStatusChartRef = useRef(null);
+  const dailyReportsChartRef = useRef(null);
+  const noiseCategoryChartRef = useRef(null);
+  
+  // Chart instances
+  const [noiseLevelChart, setNoiseLevelChart] = useState(null);
+  const [reportStatusChart, setReportStatusChart] = useState(null);
+  const [dailyReportsChart, setDailyReportsChart] = useState(null);
+  const [noiseCategoryChart, setNoiseCategoryChart] = useState(null);
+  const [noiseCategories, setNoiseCategories] = useState([]);
+
+  // API URL - single source of truth
   const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
 
-  useEffect(() => {
-    // Get admin name from localStorage or default
-    const storedAdmin = localStorage.getItem('adminName') || 'Administrator';
-    setAdminName(storedAdmin);
-    
-    fetchAllData();
-    
-    // Set up polling to refresh data every 30 seconds
-    const interval = setInterval(() => {
-      fetchAllData(true);
-    }, 30000);
-    
-    // Update clock every second
-    const clockInterval = setInterval(() => {
-      setCurrentTime(new Date());
-    }, 1000);
-    
-    return () => {
-      clearInterval(interval);
-      clearInterval(clockInterval);
-    };
-  }, [selectedPeriod]);
-
-  const fetchAllData = async (isRefresh = false) => {
-    try {
-      if (isRefresh) {
-        setRefreshing(true);
-      } else {
-        setLoading(true);
-      }
-      
-      console.log('📊 Fetching all data...');
-      
-      // Fetch all data in parallel
-      const [userResponse, reportResponse, activityResponse, reportsResponse, usersResponse] = await Promise.all([
-        fetch(`${API_BASE_URL}/analytics/users?period=${selectedPeriod}`),
-        fetch(`${API_BASE_URL}/analytics/reports?period=${selectedPeriod}`),
-        fetch(`${API_BASE_URL}/analytics/recent-activity`),
-        fetch(`${API_BASE_URL}/reports/recent`),
-        fetch(`${API_BASE_URL}/users/recent`)
-      ]);
-
-      if (!userResponse.ok) throw new Error('Failed to fetch user analytics');
-      if (!reportResponse.ok) throw new Error('Failed to fetch report analytics');
-      if (!activityResponse.ok) throw new Error('Failed to fetch recent activity');
-
-      const userData = await userResponse.json();
-      const reportData = await reportResponse.json();
-      const activityData = await activityResponse.json();
-      const reportsData = reportsResponse.ok ? await reportsResponse.json() : { success: false };
-      const usersData = usersResponse.ok ? await usersResponse.json() : { success: false };
-      
-      setUserStats(userData);
-      setReportStats(reportData);
-      setRecentActivity(activityData);
-      
-      if (reportsData.success) {
-        setRecentReports(reportsData.reports || []);
-      }
-      
-      if (usersData.success) {
-        setRecentUsers(usersData.users || []);
-      }
-      
-      // Generate notifications from real data
-      generateNotificationsFromData(activityData, reportsData, usersData);
-      
-    } catch (error) {
-      console.error('Error fetching data:', error);
-      // Generate notifications from available data
-      generateNotificationsFromData(recentActivity, { success: false }, { success: false });
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  };
-
-  const generateNotificationsFromData = (activityData, reportsData, usersData) => {
-    const newNotifications = [];
-    
-    // Generate notifications from recent reports (from database)
-    if (reportsData.success && reportsData.reports && reportsData.reports.length > 0) {
-      const recentReportsList = reportsData.reports.slice(0, 5); // Get latest 5 reports
-      
-      recentReportsList.forEach((report, index) => {
-        const timeAgo = calculateTimeAgo(report.createdAt || report.timestamp || new Date().toISOString());
-        
-        let priority = 'medium';
-        if (report.priority === 'high' || report.severity === 'high' || report.noiseLevel === 'high') {
-          priority = 'high';
-        } else if (report.priority === 'emergency' || report.severity === 'critical') {
-          priority = 'emergency';
-        } else if (report.priority === 'low' || report.noiseLevel === 'low') {
-          priority = 'low';
-        }
-
-        newNotifications.push({
-          id: `report-${report._id || report.id || index}`,
-          type: 'report',
-          title: 'New Noise Report',
-          message: `Report #${report.reportId || report._id?.slice(-6) || index + 1}: ${report.description || 'Noise complaint'} at ${report.location || 'Unknown location'}`,
-          time: timeAgo,
-          read: false,
-          priority: priority,
-          data: report,
-          category: 'report'
-        });
-      });
-    }
-
-    // Generate notifications from recent users (from database)
-    if (usersData.success && usersData.users && usersData.users.length > 0) {
-      const recentUsersList = usersData.users.slice(0, 3); // Get latest 3 users
-      
-      recentUsersList.forEach((user, index) => {
-        const timeAgo = calculateTimeAgo(user.createdAt || user.registeredAt || new Date().toISOString());
-        
-        newNotifications.push({
-          id: `user-${user._id || user.id || index}`,
-          type: 'user',
-          title: 'New User Registered',
-          message: `New ${user.userType === 'admin' ? 'Administrator' : 'User'}: ${user.username || user.email || 'New user'} has joined the system`,
-          time: timeAgo,
-          read: false,
-          priority: 'medium',
-          data: user,
-          category: 'user'
-        });
-      });
-    }
-
-    // Generate notifications from recent activities
-    if (activityData && activityData.length > 0) {
-      const recentActivities = activityData.slice(0, 5); // Get latest 5 activities
-      
-      recentActivities.forEach((activity, index) => {
-        const timeAgo = activity.time || calculateTimeAgo(activity.timestamp || new Date().toISOString());
-        
-        let type = 'activity';
-        let priority = 'low';
-        
-        if (activity.action?.includes('Reported')) {
-          type = 'report';
-          priority = 'medium';
-        } else if (activity.action?.includes('Registered')) {
-          type = 'user';
-          priority = 'medium';
-        } else if (activity.action?.includes('Resolved')) {
-          type = 'system';
-          priority = 'low';
-        } else if (activity.action?.includes('Emergency') || activity.action?.includes('Critical')) {
-          type = 'emergency';
-          priority = 'emergency';
-        }
-
-        newNotifications.push({
-          id: `activity-${index}`,
-          type: type,
-          title: 'System Activity',
-          message: activity.action || 'Activity recorded',
-          time: timeAgo,
-          read: false,
-          priority: priority,
-          data: activity,
-          category: 'activity'
-        });
-      });
-    }
-
-    // Add system notifications (for demo purposes)
-    const systemNotifications = [
-      {
-        id: 'system-1',
-        type: 'system',
-        title: 'System Status',
-        message: 'All systems are operational',
-        time: '1 hour ago',
-        read: true,
-        priority: 'low',
-        category: 'system'
-      },
-      {
-        id: 'system-2',
-        type: 'system',
-        title: 'Database Update',
-        message: 'Nightly backup completed successfully',
-        time: '2 hours ago',
-        read: true,
-        priority: 'low',
-        category: 'system'
-      }
-    ];
-
-    // Merge all notifications
-    const allNotifications = [...newNotifications, ...systemNotifications];
-    
-    // Sort by time (newest first)
-    allNotifications.sort((a, b) => {
-      const timeA = getTimeValue(a.time);
-      const timeB = getTimeValue(b.time);
-      return timeB - timeA;
-    });
-    
-    setNotifications(allNotifications);
-    
-    // Count unread notifications
-    const unreadCount = allNotifications.filter(n => !n.read).length;
-    setUnreadNotifications(unreadCount);
-    
-    // Store notifications in localStorage for persistence
-    localStorage.setItem('notifications', JSON.stringify({
-      notifications: allNotifications,
-      lastUpdated: new Date().toISOString()
-    }));
-  };
-
-  const calculateTimeAgo = (timestamp) => {
-    const now = new Date();
-    const date = new Date(timestamp);
-    const diffInSeconds = Math.floor((now - date) / 1000);
-    
-    if (diffInSeconds < 60) return 'Just now';
-    if (diffInSeconds < 3600) return `${Math.floor(diffInSeconds / 60)} minutes ago`;
-    if (diffInSeconds < 86400) return `${Math.floor(diffInSeconds / 3600)} hours ago`;
-    if (diffInSeconds < 604800) return `${Math.floor(diffInSeconds / 86400)} days ago`;
-    return `${Math.floor(diffInSeconds / 604800)} weeks ago`;
-  };
-
-  const getTimeValue = (timeString) => {
-    if (!timeString) return 0;
-    
-    const now = new Date();
-    if (timeString === 'Just now') return now.getTime();
-    
-    const match = timeString.match(/(\d+)\s*(minute|hour|day|week)s?\s*ago/);
-    if (!match) return 0;
-    
-    const [, amount, unit] = match;
-    const amountNum = parseInt(amount);
-    
-    switch(unit) {
-      case 'minute':
-        return now.getTime() - amountNum * 60 * 1000;
-      case 'hour':
-        return now.getTime() - amountNum * 60 * 60 * 1000;
-      case 'day':
-        return now.getTime() - amountNum * 24 * 60 * 60 * 1000;
-      case 'week':
-        return now.getTime() - amountNum * 7 * 24 * 60 * 60 * 1000;
-      default:
-        return 0;
-    }
-  };
-
-  const markAllAsRead = () => {
-    const updatedNotifications = notifications.map(notification => ({
-      ...notification,
-      read: true
-    }));
-    setNotifications(updatedNotifications);
-    setUnreadNotifications(0);
-    
-    // Update localStorage
-    localStorage.setItem('notifications', JSON.stringify({
-      notifications: updatedNotifications,
-      lastUpdated: new Date().toISOString()
-    }));
-  };
-
-  const markAsRead = (id) => {
-    const updatedNotifications = notifications.map(notification => 
-      notification.id === id ? { ...notification, read: true } : notification
-    );
-    setNotifications(updatedNotifications);
-    setUnreadNotifications(prev => Math.max(0, prev - 1));
-    
-    // Update localStorage
-    localStorage.setItem('notifications', JSON.stringify({
-      notifications: updatedNotifications,
-      lastUpdated: new Date().toISOString()
-    }));
-  };
-
-  const clearAllNotifications = () => {
-    if (window.confirm('Are you sure you want to clear all notifications?')) {
-      setNotifications([]);
-      setUnreadNotifications(0);
-      
-      // Update localStorage
-      localStorage.setItem('notifications', JSON.stringify({
-        notifications: [],
-        lastUpdated: new Date().toISOString()
-      }));
-    }
-  };
-
-  const getNotificationIcon = (type) => {
-    switch(type) {
-      case 'report':
-        return '📢';
-      case 'user':
-        return '👤';
-      case 'system':
-        return '⚙️';
-      case 'activity':
-        return '📈';
-      case 'emergency':
-        return '🚨';
-      default:
-        return '📋';
-    }
-  };
-
-  const getPriorityColor = (priority) => {
-    switch(priority) {
-      case 'emergency':
-        return '#ff4444';
-      case 'high':
-        return '#ff8c00';
-      case 'medium':
-        return '#ffaa00';
-      case 'low':
-        return '#4CAF50';
-      default:
-        return '#8B7355';
-    }
-  };
-
-  const handleNotificationClick = (notification) => {
-    // Mark as read when clicked
-    markAsRead(notification.id);
-    
-    // Navigate based on notification type
-    switch(notification.category) {
-      case 'report':
-        // Navigate to reports page or specific report
-        alert(`Opening report: ${notification.data?.reportId || notification.data?._id}`);
-        // You can implement navigation here
-        // window.location.href = `/admin/reports/${notification.data?._id}`;
-        break;
-      case 'user':
-        // Navigate to users page or specific user
-        alert(`Opening user profile: ${notification.data?.username || notification.data?.email}`);
-        // window.location.href = `/admin/users/${notification.data?._id}`;
-        break;
-      default:
-        // For other notifications, just close modal
-        break;
-    }
-  };
-
-  const generateHTMLReport = () => {
-    const currentDate = new Date().toLocaleDateString();
-    const currentTime = new Date().toLocaleTimeString();
-    
-    const noiseLevelReports = reportStats?.noiseLevels?.reduce((sum, level) => sum + level.count, 0) || 0;
-    const noiseLevelsHTML = reportStats?.noiseLevels?.map((level, index) => `
-      <tr style="border-bottom: 1px solid #e2e8f0;">
-        <td style="padding: 8px; text-align: left;">${index + 1}</td>
-        <td style="padding: 8px; text-align: left; text-transform: capitalize;">${level.level}</td>
-        <td style="padding: 8px; text-align: center;">${level.count}</td>
-        <td style="padding: 8px; text-align: center;">${level.percentage || 0}%</td>
-      </tr>
-    `).join('') || '';
-
-    const userTypesHTML = userStats?.userByType?.map((type, index) => `
-      <tr style="border-bottom: 1px solid #e2e8f0;">
-        <td style="padding: 8px; text-align: left;">${index + 1}</td>
-        <td style="padding: 8px; text-align: left; text-transform: capitalize;">${type.type}</td>
-        <td style="padding: 8px; text-align: center;">${type.count}</td>
-      </tr>
-    `).join('') || '';
-
-    const recentActivityHTML = recentActivity.slice(0, 10).map((activity, index) => `
-      <tr style="border-bottom: 1px solid #e2e8f0;">
-        <td style="padding: 8px; text-align: left;">${index + 1}</td>
-        <td style="padding: 8px; text-align: left;">${activity.user || 'Anonymous'}</td>
-        <td style="padding: 8px; text-align: left;">${activity.action || 'Activity'}</td>
-        <td style="padding: 8px; text-align: left;">${activity.location || 'N/A'}</td>
-        <td style="padding: 8px; text-align: left;">${activity.time || 'Just now'}</td>
-      </tr>
-    `).join('');
-
-    return `
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <meta charset="utf-8">
-      <title>NOISEWATCH - Analytics Dashboard Report</title>
-      <style>
-        body {
-          font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-          margin: 0;
-          padding: 20px;
-          background-color: #faf8f3;
-          color: #3e2723;
-        }
-        .header {
-          background: linear-gradient(135deg, #8B4513, #D2B48C);
-          color: white;
-          padding: 30px;
-          border-radius: 10px;
-          margin-bottom: 30px;
-          text-align: center;
-        }
-        .header h1 {
-          margin: 0;
-          font-size: 28px;
-          font-weight: bold;
-        }
-        .header p {
-          margin: 10px 0 0 0;
-          opacity: 0.9;
-          font-size: 16px;
-        }
-        .report-info {
-          background: white;
-          padding: 20px;
-          border-radius: 8px;
-          box-shadow: 0 1px 3px rgba(139,69,19,0.1);
-          margin-bottom: 30px;
-        }
-        .report-info h2 {
-          margin-top: 0;
-          color: #8B4513;
-          font-size: 20px;
-        }
-        .stats-grid {
-          display: grid;
-          grid-template-columns: repeat(2, 1fr);
-          gap: 20px;
-          margin-bottom: 30px;
-        }
-        .stats-card {
-          background: white;
-          padding: 25px;
-          border-radius: 10px;
-          box-shadow: 0 2px 4px rgba(139,69,19,0.1);
-          border-left: 4px solid #DAA520;
-        }
-        .stats-card h3 {
-          margin: 0 0 10px 0;
-          font-size: 14px;
-          color: #8B7355;
-          text-transform: uppercase;
-          letter-spacing: 0.5px;
-        }
-        .stats-card .value {
-          font-size: 32px;
-          font-weight: bold;
-          color: #8B4513;
-          margin: 0;
-        }
-        .section {
-          background: white;
-          padding: 25px;
-          border-radius: 10px;
-          box-shadow: 0 2px 4px rgba(139,69,19,0.1);
-          margin-bottom: 30px;
-        }
-        .section h2 {
-          margin: 0 0 20px 0;
-          color: #8B4513;
-          font-size: 20px;
-        }
-        .table {
-          width: 100%;
-          border-collapse: collapse;
-          margin-top: 15px;
-        }
-        .table th {
-          background-color: #faf8f3;
-          padding: 12px 8px;
-          text-align: left;
-          font-weight: 600;
-          color: #5d4037;
-          border-bottom: 2px solid #e8dcc6;
-        }
-        .table td {
-          padding: 8px;
-          border-bottom: 1px solid #e8dcc6;
-        }
-        .footer {
-          text-align: center;
-          margin-top: 40px;
-          padding: 20px;
-          color: #8B7355;
-          font-size: 12px;
-        }
-      </style>
-    </head>
-    <body>
-      <div class="header">
-        <h1>NOISEWATCH</h1>
-        <p>Analytics Dashboard Report - ${selectedPeriod.toUpperCase()}</p>
-        <p><small>Generated by: ${adminName} on ${currentDate} at ${currentTime}</small></p>
-      </div>
-
-      <div class="report-info">
-        <h2>Report Information</h2>
-        <p><strong>Generated on:</strong> ${currentDate} at ${currentTime}</p>
-        <p><strong>Time Period:</strong> ${selectedPeriod.charAt(0).toUpperCase() + selectedPeriod.slice(1)}</p>
-        <p><strong>Report Type:</strong> Complete Analytics Overview</p>
-        <p><strong>Generated by:</strong> ${adminName}</p>
-      </div>
-
-      <div class="stats-grid">
-        <div class="stats-card">
-          <h3>Total Users</h3>
-          <div class="value">${userStats?.totalUsers || 0}</div>
-        </div>
-        <div class="stats-card">
-          <h3>Active Users</h3>
-          <div class="value">${userStats?.activeUsers || 0}</div>
-        </div>
-        <div class="stats-card">
-          <h3>Total Reports</h3>
-          <div class="value">${reportStats?.totalReports || 0}</div>
-        </div>
-        <div class="stats-card">
-          <h3>Resolved Reports</h3>
-          <div class="value">${reportStats?.reportStatus?.find(r => r.status === 'resolved')?.count || 0}</div>
-        </div>
-      </div>
-
-      <div class="section">
-        <h2>Noise Level Distribution</h2>
-        <table class="table">
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>Noise Level</th>
-              <th>Reports</th>
-              <th>Percentage</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${noiseLevelsHTML}
-          </tbody>
-        </table>
-      </div>
-
-      <div class="section">
-        <h2>User Distribution</h2>
-        <table class="table">
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>User Type</th>
-              <th>Count</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${userTypesHTML}
-          </tbody>
-        </table>
-      </div>
-
-      <div class="section">
-        <h2>Recent Activity</h2>
-        <table class="table">
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>User</th>
-              <th>Action</th>
-              <th>Location</th>
-              <th>Time</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${recentActivityHTML}
-          </tbody>
-        </table>
-      </div>
-
-      <div class="footer">
-        <p>This report was automatically generated by the NOISEWATCH Analytics System</p>
-        <p>For questions or support, please contact the system administrator</p>
-      </div>
-    </body>
-    </html>
-    `;
-  };
-
-  const handleExportReport = async () => {
-    try {
-      setExportLoading(true);
-      const htmlContent = generateHTMLReport();
-      
-      const blob = new Blob([htmlContent], { type: 'text/html' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `NOISEWATCH_Analytics_Report_${new Date().toISOString().split('T')[0]}.html`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      
-      console.log('Report generated successfully!');
-    } catch (error) {
-      console.error('Error generating report:', error);
-    } finally {
-      setExportLoading(false);
-    }
-  };
-
-  const openDrawer = () => {
-    setDrawerVisible(true);
-  };
-
-  const closeDrawer = () => {
-    setDrawerVisible(false);
-  };
-
-  const toggleNotificationModal = () => {
-    setNotificationModalVisible(!notificationModalVisible);
-    if (!notificationModalVisible) {
-      // Mark all as read when opening notification modal
-      markAllAsRead();
-    }
-  };
-
-  const handleLogout = async () => {
-    if (window.confirm('Are you sure you want to logout?')) {
-      localStorage.clear();
-      window.location.href = '/login';
-    }
-  };
-
-  const refreshAnalytics = () => {
-    fetchAllData(true);
-  };
-
+  // Period options
   const periods = [
     { id: 'daily', label: 'Daily' },
     { id: 'weekly', label: 'Weekly' },
@@ -664,434 +48,796 @@ const AdminDashboard = () => {
     { id: 'yearly', label: 'Yearly' }
   ];
 
+  // ========== FETCH DASHBOARD DATA ==========
+  const fetchDashboardData = async () => {
+    if (!apiConnected) return;
+    
+    try {
+      setRefreshing(true);
+      setFetchError(null);
+      
+      console.log(`📊 Fetching dashboard data for period: ${selectedPeriod}`);
+      console.log(`Using API: ${API_BASE_URL}/analytics/dashboard?period=${selectedPeriod}`);
+      
+      const response = await fetch(`${API_BASE_URL}/analytics/dashboard?period=${selectedPeriod}`);
+      
+      if (!response.ok) {
+        throw new Error(`Failed to fetch dashboard data: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      
+      if (data.success) {
+        console.log('✅ Dashboard data received:', data);
+        setDashboardData(data);
+        
+        // Set noise categories for charts
+        if (data.noiseCategories) {
+          setNoiseCategories(data.noiseCategories);
+        }
+        
+        // Set recent activity
+        if (data.recentActivity) {
+          setRecentActivity(data.recentActivity);
+        }
+        
+        // Generate notifications from recent activity
+        generateNotifications(data.recentActivity);
+      } else {
+        throw new Error(data.error || 'Failed to load data');
+      }
+      
+    } catch (error) {
+      console.error('❌ Error fetching dashboard data:', error);
+      setFetchError(error.message);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  // ========== GENERATE NOTIFICATIONS ==========
+  const generateNotifications = (activities) => {
+    if (!activities || activities.length === 0) return;
+    
+    const newNotifications = [];
+    const now = new Date();
+    const savedUnreadIds = JSON.parse(localStorage.getItem('readNotifications') || '[]');
+    
+    activities
+      .filter(activity => {
+        const activityTime = new Date(activity.timestamp);
+        const twoHoursAgo = new Date(now.getTime() - 2 * 60 * 60 * 1000);
+        return activityTime > twoHoursAgo;
+      })
+      .forEach((activity) => {
+        let priority = 'low';
+        let title = 'System Activity';
+        
+        if (activity.type === 'report') {
+          title = 'New Noise Report';
+          if (activity.noiseLevel === 'red') priority = 'emergency';
+          else if (activity.noiseLevel === 'yellow') priority = 'high';
+          else priority = 'medium';
+        } else if (activity.type === 'registration') {
+          title = 'New User Registered';
+          priority = 'medium';
+        }
+        
+        const notificationId = `notif-${activity.id}-${new Date(activity.timestamp).getTime()}`;
+        const isRead = savedUnreadIds.includes(notificationId);
+        
+        newNotifications.push({
+          id: notificationId,
+          type: activity.type,
+          title,
+          message: `${activity.user} ${activity.action}`,
+          time: activity.time,
+          timestamp: activity.timestamp,
+          read: isRead,
+          priority,
+          data: activity
+        });
+      });
+
+    newNotifications.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+    setNotifications(newNotifications.slice(0, 30));
+    setUnreadNotifications(newNotifications.filter(n => !n.read).length);
+  };
+
+  // ========== FORMAT TIME AGO ==========
+  const formatTimeAgo = useCallback((timestamp) => {
+    if (!timestamp) return 'Just now';
+    
+    const now = new Date();
+    const date = new Date(timestamp);
+    const diffMs = now - date;
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMins / 60);
+    const diffDays = Math.floor(diffHours / 24);
+
+    if (diffMins < 1) return 'Just now';
+    if (diffMins < 60) return `${diffMins} min ago`;
+    if (diffHours < 24) return `${diffHours} hr ago`;
+    if (diffDays < 7) return `${diffDays} day ago`;
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  }, []);
+
+  // ========== TEST API CONNECTION ==========
+  useEffect(() => {
+    const testConnection = async () => {
+      try {
+        console.log(`🔍 Testing connection to: ${API_BASE_URL}/reports/get-report`);
+        const response = await fetch(`${API_BASE_URL}/reports/get-report`, { 
+          method: 'HEAD',
+          headers: { 'Content-Type': 'application/json' },
+          mode: 'cors'
+        });
+        
+        if (response.ok) {
+          console.log(`✅ Connected to API at: ${API_BASE_URL}`);
+          setApiConnected(true);
+          setFetchError(null);
+        } else {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+      } catch (error) {
+        console.error(`❌ Failed to connect: ${error.message}`);
+        setApiConnected(false);
+        setFetchError('Cannot connect to server. Make sure backend is running on port 5000');
+        setLoading(false);
+      }
+    };
+    
+    testConnection();
+    
+    const clockInterval = setInterval(() => {
+      setCurrentTime(new Date());
+    }, 1000);
+    
+    return () => {
+      clearInterval(clockInterval);
+    };
+  }, []);
+
+  // ========== INITIAL LOAD ==========
+  useEffect(() => {
+    const storedAdmin = localStorage.getItem('adminName') || 'Administrator';
+    setAdminName(storedAdmin);
+    
+    if (apiConnected) {
+      fetchDashboardData();
+    }
+  }, [apiConnected]);
+
+  // Fetch data when period changes
+  useEffect(() => {
+    if (apiConnected) {
+      fetchDashboardData();
+    }
+  }, [selectedPeriod, apiConnected]);
+
+  // Refresh every 30 seconds if connected
+  useEffect(() => {
+    if (!apiConnected) return;
+    
+    const interval = setInterval(() => {
+      fetchDashboardData();
+    }, 30000);
+    
+    return () => clearInterval(interval);
+  }, [apiConnected, selectedPeriod]);
+
+  // ========== CREATE CHARTS ==========
+  useEffect(() => {
+    if (!loading && dashboardData) {
+      destroyAllCharts();
+      setTimeout(() => createCharts(), 200);
+    }
+  }, [loading, dashboardData]);
+
+  const destroyAllCharts = () => {
+    if (noiseLevelChart) noiseLevelChart.destroy();
+    if (reportStatusChart) reportStatusChart.destroy();
+    if (dailyReportsChart) dailyReportsChart.destroy();
+    if (noiseCategoryChart) noiseCategoryChart.destroy();
+  };
+
+  const createCharts = () => {
+    if (!dashboardData) return;
+    
+    const { reportStats } = dashboardData;
+    const totalReports = reportStats?.totalReports || 0;
+
+    // 1. Noise Level Chart (Doughnut)
+    if (noiseLevelChartRef.current && reportStats?.noiseLevels) {
+      const ctx = noiseLevelChartRef.current.getContext('2d');
+      if (noiseLevelChart) noiseLevelChart.destroy();
+      
+      const hasData = reportStats.noiseLevels.some(n => n.count > 0);
+      if (hasData) {
+        const chart = new Chart(ctx, {
+          type: 'doughnut',
+          data: {
+            labels: ['Red (High)', 'Yellow (Medium)', 'Green (Low)'],
+            datasets: [{
+              data: reportStats.noiseLevels.map(n => n.count),
+              backgroundColor: ['#F44336', '#FFC107', '#4CAF50'],
+              borderWidth: 1
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            cutout: '60%',
+            plugins: {
+              legend: { position: 'top' },
+              title: {
+                display: true,
+                text: 'Noise Level Distribution'
+              },
+              tooltip: {
+                callbacks: {
+                  label: function(context) {
+                    const label = context.label || '';
+                    const value = context.raw || 0;
+                    const percentage = totalReports > 0 ? Math.round((value / totalReports) * 100) : 0;
+                    return `${label}: ${value} reports (${percentage}%)`;
+                  }
+                }
+              }
+            }
+          }
+        });
+        setNoiseLevelChart(chart);
+      }
+    }
+
+    // 2. Report Status Chart (Pie)
+    if (reportStatusChartRef.current && reportStats?.reportStatus) {
+      const ctx = reportStatusChartRef.current.getContext('2d');
+      if (reportStatusChart) reportStatusChart.destroy();
+      
+      const hasData = reportStats.reportStatus.some(s => s.count > 0);
+      if (hasData) {
+        const chart = new Chart(ctx, {
+          type: 'pie',
+          data: {
+            labels: ['Pending', 'Monitoring', 'Action Required', 'Resolved'],
+            datasets: [{
+              data: reportStats.reportStatus.map(s => s.count),
+              backgroundColor: ['#FF9800', '#2196F3', '#F44336', '#4CAF50'],
+              borderWidth: 1
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { position: 'top' },
+              title: {
+                display: true,
+                text: 'Report Status'
+              },
+              tooltip: {
+                callbacks: {
+                  label: function(context) {
+                    const label = context.label || '';
+                    const value = context.raw || 0;
+                    const percentage = totalReports > 0 ? Math.round((value / totalReports) * 100) : 0;
+                    return `${label}: ${value} reports (${percentage}%)`;
+                  }
+                }
+              }
+            }
+          }
+        });
+        setReportStatusChart(chart);
+      }
+    }
+
+    // 3. Daily Reports Chart (Bar)
+    if (dailyReportsChartRef.current && reportStats?.reportTrend) {
+      const ctx = dailyReportsChartRef.current.getContext('2d');
+      if (dailyReportsChart) dailyReportsChart.destroy();
+      
+      const hasData = reportStats.reportTrend.some(v => v > 0);
+      if (hasData) {
+        const chart = new Chart(ctx, {
+          type: 'bar',
+          data: {
+            labels: reportStats.trendLabels || ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+            datasets: [{
+              label: 'Reports',
+              data: reportStats.reportTrend,
+              backgroundColor: 'rgba(211, 84, 0, 0.7)',
+              borderColor: '#D35400',
+              borderWidth: 1
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { display: false },
+              title: {
+                display: true,
+                text: `${selectedPeriod === 'daily' ? 'Hourly' : 'Daily'} Reports`
+              }
+            },
+            scales: {
+              y: { beginAtZero: true, ticks: { stepSize: 1, precision: 0 } }
+            }
+          }
+        });
+        setDailyReportsChart(chart);
+      }
+    }
+
+    // 4. Noise Category Chart (Bar)
+    if (noiseCategoryChartRef.current && noiseCategories.length > 0) {
+      const ctx = noiseCategoryChartRef.current.getContext('2d');
+      if (noiseCategoryChart) noiseCategoryChart.destroy();
+      
+      const chart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: noiseCategories.slice(0, 5).map(c => c.name),
+          datasets: [{
+            label: 'Reports',
+            data: noiseCategories.slice(0, 5).map(c => c.count),
+            backgroundColor: noiseCategories.slice(0, 5).map(c => c.color || '#D35400'),
+            borderWidth: 1
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            title: {
+              display: true,
+              text: 'Top Noise Categories'
+            }
+          },
+          scales: {
+            y: { beginAtZero: true, ticks: { stepSize: 1, precision: 0 } }
+          }
+        }
+      });
+      setNoiseCategoryChart(chart);
+    }
+  };
+
+  // ========== NOTIFICATION ACTIONS ==========
+  const markAsRead = (id) => {
+    setNotifications(prev => 
+      prev.map(n => n.id === id ? { ...n, read: true } : n)
+    );
+    setUnreadNotifications(prev => Math.max(0, prev - 1));
+    
+    const savedUnreadIds = JSON.parse(localStorage.getItem('readNotifications') || '[]');
+    if (!savedUnreadIds.includes(id)) {
+      savedUnreadIds.push(id);
+      localStorage.setItem('readNotifications', JSON.stringify(savedUnreadIds));
+    }
+  };
+
+  const markAllAsRead = () => {
+    setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+    setUnreadNotifications(0);
+    localStorage.setItem('readNotifications', JSON.stringify(notifications.map(n => n.id)));
+  };
+
+  const clearAllNotifications = () => {
+    if (window.confirm('Are you sure you want to clear all notifications?')) {
+      setNotifications([]);
+      setUnreadNotifications(0);
+      localStorage.removeItem('readNotifications');
+    }
+  };
+
+  // ========== UI ACTIONS ==========
+  const openDrawer = () => setDrawerVisible(true);
+  const closeDrawer = () => setDrawerVisible(false);
+  
+  const toggleNotificationModal = () => {
+    setNotificationModalVisible(!notificationModalVisible);
+  };
+
+  const handleViewAllActivity = () => {
+    setActivityModalVisible(true);
+  };
+
+  const handleLogout = () => {
+    if (window.confirm('Are you sure you want to logout?')) {
+      localStorage.clear();
+      window.location.href = '/login';
+    }
+  };
+
+  const refreshData = () => {
+    fetchDashboardData();
+  };
+
+  const handlePeriodChange = (period) => {
+    setSelectedPeriod(period);
+  };
+
+  // ========== RENDER METHODS ==========
+  const renderStatCard = (title, value, icon, color) => (
+    <div className="stat-card" style={{ borderLeftColor: color }}>
+      <div className="stat-header">
+        <span className="material-icons stat-icon" style={{ color }}>{icon}</span>
+        <div className="stat-title">{title}</div>
+      </div>
+      <div className="stat-content">
+        <div className="stat-value">{value || 0}</div>
+      </div>
+    </div>
+  );
+
+  const renderNoiseCategoryStats = () => (
+    <div className="noise-category-stats">
+      {noiseCategories.slice(0, 5).map((category, index) => (
+        <div key={index} className="category-item">
+          <div className="category-header">
+            <div className="category-indicator" style={{ backgroundColor: category.color || '#D35400' }} />
+            <div className="category-name">{category.name}</div>
+          </div>
+          <div className="category-count">{category.count}</div>
+        </div>
+      ))}
+    </div>
+  );
+
+  const renderRecentActivityList = () => (
+    <div className="activity-list">
+      {recentActivity.length > 0 ? (
+        recentActivity.slice(0, 8).map((activity, index) => (
+          <div key={activity.id || index} className="activity-item">
+            <div className="activity-icon">
+              <span className="material-icons">
+                {activity.type === 'report' ? 'volume_up' : 'person_add'}
+              </span>
+            </div>
+            <div className="activity-content">
+              <div className="activity-header">
+                <div className="activity-user">{activity.user || 'Anonymous'}</div>
+                <div className="activity-time">{activity.time}</div>
+              </div>
+              <div className="activity-action">
+                {activity.user} {activity.action}
+                {activity.reason && `: ${activity.reason}`}
+              </div>
+            </div>
+          </div>
+        ))
+      ) : (
+        <div className="no-activity">
+          <span className="material-icons">info</span>
+          <div>No recent activity</div>
+        </div>
+      )}
+    </div>
+  );
+
+  const renderActivityModal = () => (
+    <div className="notification-modal-overlay" onClick={() => setActivityModalVisible(false)}>
+      <div className="notification-modal activity-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="notification-modal-header">
+          <h2 className="notification-modal-title">
+            <span className="material-icons" style={{ color: '#D35400' }}>timeline</span>
+            All Activity
+          </h2>
+          <button className="notification-close-btn" onClick={() => setActivityModalVisible(false)}>
+            <span className="material-icons">close</span>
+          </button>
+        </div>
+        <div className="notification-modal-content">
+          {recentActivity.length > 0 ? (
+            <div className="activity-list-full">
+              {recentActivity.map((activity, index) => (
+                <div key={activity.id || index} className="activity-item-full">
+                  <div className="activity-icon">
+                    <span className="material-icons">
+                      {activity.type === 'report' ? 'volume_up' : 'person_add'}
+                    </span>
+                  </div>
+                  <div className="activity-info">
+                    <div className="activity-user">{activity.user}</div>
+                    <div className="activity-time">{activity.time}</div>
+                    <div className="activity-action">{activity.action}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="no-notifications">
+              <span className="material-icons large">list_alt</span>
+              <h3>No activity found</h3>
+            </div>
+          )}
+        </div>
+        <div className="notification-modal-footer">
+          <button className="notification-close-footer-btn" onClick={() => setActivityModalVisible(false)}>
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
   const formatTime = (date) => {
     return date.toLocaleTimeString('en-US', {
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: true
+      hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true
     });
   };
 
   const formatDate = (date) => {
     return date.toLocaleDateString('en-US', {
-      weekday: 'short',
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric'
+      weekday: 'short', month: 'short', day: 'numeric', year: 'numeric'
     });
   };
 
-  const renderSummaryCard = (title, value, icon, color, loading) => (
-    <div className={`summary-card ${loading ? 'loading' : ''}`} style={{ borderLeftColor: color }}>
-      <div className="summary-content">
-        <div className="summary-info">
-          <div className="summary-title">{title}</div>
-          {loading ? (
-            <div className="loading-spinner"></div>
-          ) : (
-            <div>
-              <div className="summary-value" style={{ color }}>{value || 0}</div>
-            </div>
-          )}
-        </div>
-        <div className="summary-icon" style={{ backgroundColor: color + '20' }}>
-          <span className="material-icons">{icon}</span>
-        </div>
-      </div>
-    </div>
-  );
+  const getNotificationIcon = (type) => {
+    switch (type) {
+      case 'report': return '📢';
+      case 'registration': return '👤';
+      default: return '📋';
+    }
+  };
 
-  const renderStatSummaryCard = (title, items, icon, loading) => (
-    <div className="card">
-      <div className="card-header">
-        <div className="card-title">
-          <span className="material-icons" style={{ color: '#8B4513' }}>{icon}</span>
-          {title}
-        </div>
-      </div>
-      <div className="card-content">
-        {loading ? (
-          <div className="loading-container">
-            <div className="loading-spinner large"></div>
-          </div>
-        ) : items && items.length > 0 ? (
-          <div className="stats-list">
-            {items.map((item, index) => (
-              <div key={index} className="stat-item">
-                <div className="stat-info">
-                  {'color' in item && (
-                    <div className="stat-color" style={{ backgroundColor: item.color }} />
-                  )}
-                  <div className="stat-name">
-                    {'level' in item 
-                      ? item.level.charAt(0).toUpperCase() + item.level.slice(1)
-                      : 'type' in item 
-                        ? item.type === 'user' ? 'Regular Users' : 'Admin Users'
-                        : item.status?.replace('_', ' ').charAt(0).toUpperCase() + item.status?.replace('_', ' ').slice(1)
-                    }
-                  </div>
-                </div>
-                <div className="stat-stats">
-                  <div className="stat-count">{item.count || 0}</div>
-                  {item.percentage && (
-                    <div className="stat-percent">{item.percentage}%</div>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="no-data">
-            <span className="material-icons">info</span>
-            <div>No data available</div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-
-  const renderDataTrendCard = (title, data, labels, icon, color, loading) => (
-    <div className="card">
-      <div className="card-header">
-        <div className="card-title">
-          <span className="material-icons" style={{ color: '#8B4513' }}>{icon}</span>
-          {title}
-        </div>
-      </div>
-      <div className="card-content">
-        {loading ? (
-          <div className="loading-container">
-            <div className="loading-spinner large"></div>
-          </div>
-        ) : data && data.length > 0 ? (
-          <div className="trend-summary">
-            <div className="trend-header">
-              <div className="trend-total" style={{ color }}>
-                Total: {data.reduce((sum, val) => sum + (val || 0), 0)}
-              </div>
-              <div className="trend-average">
-                Avg: {Math.round(data.reduce((sum, val) => sum + (val || 0), 0) / data.length)}
-              </div>
-            </div>
-            <div className="trend-items">
-              {data.map((value, index) => (
-                <div key={index} className="trend-item">
-                  <div className="trend-label">{labels?.[index] || `Day ${index + 1}`}</div>
-                  <div className="trend-value" style={{ color }}>{value || 0}</div>
-                  <div className="trend-bar-container">
-                    <div 
-                      className="trend-bar" 
-                      style={{ 
-                        backgroundColor: color,
-                        width: `${Math.min((value / Math.max(...data)) * 100, 100)}%`
-                      }}
-                    />
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        ) : (
-          <div className="no-data">
-            <span className="material-icons">info</span>
-            <div>No trend data available</div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-
-  const renderRecentActivity = () => (
-    <div className="card">
-      <div className="card-header">
-        <div className="card-title">
-          <span className="material-icons" style={{ color: '#8B4513' }}>timeline</span>
-          Recent Activity
-        </div>
-        <button className="view-all-btn">
-          <div className="view-all-text">View All</div>
-        </button>
-      </div>
-      <div className="card-content">
-        {loading ? (
-          <div className="loading-container">
-            <div className="loading-spinner large"></div>
-          </div>
-        ) : recentActivity.length > 0 ? (
-          <div className="activity-list">
-            {recentActivity.slice(0, 5).map((activity, index) => (
-              <div key={index} className="activity-item">
-                <div className="activity-icon">
-                  <span className="material-icons">
-                    {activity.action?.includes('Reported') ? 'volume_up' : 
-                     activity.action?.includes('Updated') ? 'edit' :
-                     activity.action?.includes('Registered') ? 'person_add' :
-                     activity.action?.includes('Resolved') ? 'check_circle' : 'notifications'}
-                  </span>
-                </div>
-                <div className="activity-info">
-                  <div className="activity-header">
-                    <div className="activity-user">{activity.user || 'Anonymous'}</div>
-                    <div className="activity-time">{activity.time || 'Just now'}</div>
-                  </div>
-                  <div className="activity-action">{activity.action || 'Activity'}</div>
-                  {activity.location && <div className="activity-location">{activity.location}</div>}
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="no-data">
-            <span className="material-icons">info</span>
-            <div>No recent activity</div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-
-  const renderDashboard = () => (
-    <div className="dashboard-container">
-      {/* Page Header with Actions */}
-      <div className="page-header">
-        <div className="section-title">Admin Dashboard</div>
-        <div className="header-actions">
-          <button
-            className={`btn btn-secondary ${refreshing ? 'btn-disabled' : ''}`}
-            onClick={refreshAnalytics}
-            disabled={refreshing || loading}
-          >
-            {refreshing ? (
-              <div className="loading-spinner small"></div>
-            ) : (
-              <span className="material-icons">refresh</span>
-            )}
-            <div className="btn-secondary-text">
-              {refreshing ? 'Refreshing...' : 'Refresh'}
-            </div>
-          </button>
-          <button
-            className={`btn btn-primary ${exportLoading ? 'btn-disabled' : ''}`}
-            onClick={handleExportReport}
-            disabled={exportLoading || loading}
-          >
-            {exportLoading ? (
-              <div className="loading-spinner small"></div>
-            ) : (
-              <span className="material-icons">download</span>
-            )}
-            <div className="btn-primary-text">
-              {exportLoading ? 'Generating...' : 'Export Report'}
-            </div>
-          </button>
-        </div>
-      </div>
-
-      {/* Time Period Selector */}
-      <div className="period-selector">
-        <div className="period-content">
-          {periods.map((period) => (
-            <button
-              key={period.id}
-              className={`period-button ${selectedPeriod === period.id ? 'period-button-active' : ''}`}
-              onClick={() => setSelectedPeriod(period.id)}
-              disabled={loading}
-            >
-              {period.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Summary Stats */}
-      <div className="summary-grid">
-        {renderSummaryCard('Total Users', userStats?.totalUsers, 'people', '#8B4513', loading)}
-        {renderSummaryCard('Active Users', userStats?.activeUsers, 'person', '#DAA520', loading)}
-        {renderSummaryCard('New Users', userStats?.newUsers, 'person_add', '#B8860B', loading)}
-        {renderSummaryCard('Total Reports', reportStats?.totalReports, 'description', '#8B7355', loading)}
-        {renderSummaryCard('Resolved Reports', reportStats?.reportStatus?.find(r => r.status === 'resolved')?.count, 'check_circle', '#4CAF50', loading)}
-        {renderSummaryCard('High Noise Reports', reportStats?.noiseLevels?.find(n => n.level === 'high')?.count, 'warning', '#F44336', loading)}
-      </div>
-
-      {/* Statistics Grid */}
-      <div className="stats-grid">
-        <div className="grid-column">
-          {renderStatSummaryCard('User Distribution', userStats?.userByType, 'people', loading)}
-          {renderDataTrendCard(
-            'User Growth Trend', 
-            userStats?.userGrowth, 
-            userStats?.activityLabels, 
-            'trending_up', 
-            '#8B4513', 
-            loading
-          )}
-        </div>
-        
-        <div className="grid-column">
-          {renderStatSummaryCard('Noise Level Distribution', reportStats?.noiseLevels, 'volume_up', loading)}
-          {renderStatSummaryCard('Report Status', reportStats?.reportStatus, 'assignment', loading)}
-        </div>
-        
-        <div className="grid-column">
-          {renderDataTrendCard(
-            'Active Users Trend', 
-            userStats?.userActivity, 
-            userStats?.activityLabels, 
-            'person', 
-            '#DAA520', 
-            loading
-          )}
-          {renderDataTrendCard(
-            'Report Filing Trend', 
-            reportStats?.reportTrend, 
-            reportStats?.trendLabels, 
-            'timeline', 
-            '#8B7355', 
-            loading
-          )}
-        </div>
-      </div>
-
-      {/* Recent Activity */}
-      <div className="recent-activity-section">
-        {renderRecentActivity()}
-      </div>
-    </div>
-  );
+  const getPriorityColor = (priority) => {
+    switch (priority) {
+      case 'emergency': return '#ff4444';
+      case 'high': return '#ff8c00';
+      case 'medium': return '#ffaa00';
+      case 'low': return '#4CAF50';
+      default: return '#8B7355';
+    }
+  };
 
   if (loading && !refreshing) {
     return (
-      <div className="container">
+      <div className="dashboard-container">
         <div className="loading-container fullscreen">
           <div className="loading-spinner large"></div>
           <div className="loading-text">Loading admin dashboard...</div>
+          {!apiConnected && (
+            <div className="loading-text" style={{ color: '#F44336', marginTop: '10px' }}>
+              Cannot connect to server. Make sure backend is running on port 5000
+            </div>
+          )}
         </div>
       </div>
     );
   }
 
   return (
-    <div className="container">
+    <div className="dashboard-container">
       {/* Header */}
-      <div className="header">
-        <div className="header-content">
-          <div className="header-top">
-            <div className="header-left">
-              <button onClick={openDrawer} className="header-button">
-                <span className="material-icons">menu</span>
-              </button>
-              <div className="header-welcome">
-                <span className="welcome-text">Welcome back,</span>
-                <span className="admin-name">{adminName}</span>
+      <div className="dashboard-header">
+        <div className="header-gradient">
+          <div className="header-content">
+            <div className="header-top">
+              <div className="header-left">
+                <button onClick={openDrawer} className="header-button">
+                  <span className="material-icons">menu</span>
+                </button>
+                <div className="header-welcome">
+                  <span className="welcome-text">Welcome back,</span>
+                  <span className="admin-name">{adminName}</span>
+                </div>
+                <div className="real-time-clock">
+                  <span className="material-icons">schedule</span>
+                  <span>{formatTime(currentTime)}</span>
+                </div>
               </div>
-              <div className="real-time-clock">
-                <span className="material-icons">schedule</span>
-                <span className="clock-time">{formatTime(currentTime)}</span>
+              <div className="header-right">
+                <button onClick={toggleNotificationModal} className="header-button notification-button">
+                  <span className="material-icons">notifications</span>
+                  {unreadNotifications > 0 && (
+                    <span className="notification-badge">{unreadNotifications}</span>
+                  )}
+                </button>
+                <button onClick={handleLogout} className="header-button">
+                  <span className="material-icons">logout</span>
+                </button>
               </div>
             </div>
-            <div className="header-right">
-              <button 
-                onClick={toggleNotificationModal} 
-                className="header-button notification-button"
-              >
-                <span className="material-icons">notifications</span>
-                {unreadNotifications > 0 && (
-                  <div className="notification-badge">
-                    <div className="notification-badge-text">
-                      {unreadNotifications > 99 ? '99+' : unreadNotifications}
-                    </div>
-                  </div>
-                )}
-              </button>
-              <button onClick={handleLogout} className="header-button">
-                <span className="material-icons">logout</span>
-              </button>
+            <div className="header-title">
+              <h1>NOISEWATCH</h1>
+              <div className="header-subtitle">
+                Admin Dashboard | {formatDate(currentTime)}
+              </div>
             </div>
           </div>
-          <div className="header-title"><h1>NOISEWATCH</h1></div>
-          <div className="header-subtitle">Admin Dashboard | {formatDate(currentTime)}</div>
         </div>
       </div>
 
-      {/* Content */}
-      <div className="content">
-        {renderDashboard()}
+      {/* Period Selector */}
+      <div className="period-selector">
+        <div className="period-content">
+          {periods.map((period) => (
+            <button
+              key={period.id}
+              className={`period-button ${selectedPeriod === period.id ? 'period-button-active' : ''}`}
+              onClick={() => handlePeriodChange(period.id)}
+            >
+              {period.label}
+            </button>
+          ))}
+        </div>
+        <button onClick={refreshData} className="refresh-button" disabled={refreshing || !apiConnected}>
+          <span className="material-icons">{refreshing ? 'sync' : 'refresh'}</span>
+        </button>
       </div>
+
+      {/* Period Title */}
+      <div className="period-title">
+        <span className="period-title-label">Current View:</span>
+        <span className="period-title-value">{selectedPeriod.charAt(0).toUpperCase() + selectedPeriod.slice(1)}</span>
+      </div>
+
+      {/* Error Message */}
+      {fetchError && (
+        <div className="error-message">
+          <span className="material-icons">error</span>
+          <span>{fetchError}</span>
+        </div>
+      )}
+
+      {!apiConnected && (
+        <div className="error-message" style={{ backgroundColor: '#FFF3CD', borderLeftColor: '#FFC107', color: '#856404' }}>
+          <span className="material-icons">warning</span>
+          <span>Cannot connect to server. Please make sure your backend is running on port 5000</span>
+        </div>
+      )}
+
+      {/* Main Content */}
+      {apiConnected && dashboardData && (
+        <div className="dashboard-content">
+          {/* Summary Stats */}
+          <div className="stats-grid">
+            {renderStatCard('Total Users', dashboardData.userStats?.totalUsers, 'people', '#3E2C23')}
+            {renderStatCard('Active Users', dashboardData.userStats?.activeUsers, 'person', '#5D4A36')}
+            {renderStatCard('New Users', dashboardData.userStats?.newUsers, 'person_add', '#D35400')}
+            {renderStatCard('Total Reports', dashboardData.reportStats?.totalReports, 'description', '#3E2C23')}
+            {renderStatCard(`${selectedPeriod} Reports`, dashboardData.reportStats?.periodReports, 'assignment', '#D35400')}
+            {renderStatCard('Resolved Reports', dashboardData.reportStats?.resolvedReports || 0, 'check_circle', '#4CAF50')}
+          </div>
+
+          {/* Charts Section */}
+          <div className="charts-section">
+            <div className="charts-grid">
+              {/* Noise Level Distribution Chart */}
+              {dashboardData.reportStats?.noiseLevels && (
+                <div className="chart-card">
+                  <div className="chart-header">
+                    <div className="chart-title">
+                      <span className="material-icons">volume_up</span>
+                      Noise Level Distribution
+                    </div>
+                  </div>
+                  <div className="chart-container">
+                    <canvas ref={noiseLevelChartRef} />
+                  </div>
+                </div>
+              )}
+
+              {/* Report Status Chart */}
+              {dashboardData.reportStats?.reportStatus && (
+                <div className="chart-card">
+                  <div className="chart-header">
+                    <div className="chart-title">
+                      <span className="material-icons">assignment</span>
+                      Report Status
+                    </div>
+                  </div>
+                  <div className="chart-container">
+                    <canvas ref={reportStatusChartRef} />
+                  </div>
+                </div>
+              )}
+
+              {/* Daily Reports Chart */}
+              {dashboardData.reportStats?.reportTrend && (
+                <div className="chart-card">
+                  <div className="chart-header">
+                    <div className="chart-title">
+                      <span className="material-icons">bar_chart</span>
+                      {selectedPeriod === 'daily' ? 'Hourly Reports' : 'Daily Reports'}
+                    </div>
+                  </div>
+                  <div className="chart-container">
+                    <canvas ref={dailyReportsChartRef} />
+                  </div>
+                </div>
+              )}
+
+              {/* Noise Category Chart */}
+              {noiseCategories.length > 0 && (
+                <div className="chart-card">
+                  <div className="chart-header">
+                    <div className="chart-title">
+                      <span className="material-icons">category</span>
+                      Top Noise Categories
+                    </div>
+                  </div>
+                  <div className="chart-container">
+                    <canvas ref={noiseCategoryChartRef} />
+                  </div>
+                  <div className="chart-stats">
+                    {renderNoiseCategoryStats()}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Recent Activity */}
+          <div className="recent-activity-section">
+            <div className="activity-card">
+              <div className="activity-header">
+                <div className="activity-title">
+                  <span className="material-icons">history</span>
+                  Recent Activity
+                </div>
+                <button className="view-all-button" onClick={handleViewAllActivity}>
+                  <span>View All</span>
+                  <span className="material-icons">arrow_forward</span>
+                </button>
+              </div>
+              <div className="activity-content">
+                {renderRecentActivityList()}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Notification Modal */}
       {notificationModalVisible && (
         <div className="notification-modal-overlay" onClick={() => setNotificationModalVisible(false)}>
           <div className="notification-modal" onClick={(e) => e.stopPropagation()}>
             <div className="notification-modal-header">
-              <h2 className="notification-modal-title">Notifications</h2>
+              <h2 className="notification-modal-title">
+                <span className="material-icons" style={{ color: '#D35400' }}>notifications</span>
+                Notifications
+              </h2>
               <div className="notification-modal-actions">
-                <button 
-                  className="notification-action-btn mark-read-btn"
-                  onClick={markAllAsRead}
-                  disabled={unreadNotifications === 0}
-                >
-                  <span className="material-icons">check</span>
-                  <span>Mark all as read</span>
+                <button onClick={markAllAsRead} disabled={unreadNotifications === 0} className="mark-read-btn">
+                  <span className="material-icons">check</span> Mark all read
                 </button>
-                <button 
-                  className="notification-action-btn clear-btn"
-                  onClick={clearAllNotifications}
-                  disabled={notifications.length === 0}
-                >
-                  <span className="material-icons">delete</span>
-                  <span>Clear all</span>
+                <button onClick={clearAllNotifications} disabled={notifications.length === 0} className="clear-btn">
+                  <span className="material-icons">delete</span> Clear all
                 </button>
-                <button 
-                  className="notification-close-btn"
-                  onClick={() => setNotificationModalVisible(false)}
-                >
+                <button onClick={() => setNotificationModalVisible(false)} className="notification-close-btn">
                   <span className="material-icons">close</span>
                 </button>
               </div>
             </div>
-            
             <div className="notification-modal-content">
               {notifications.length > 0 ? (
                 <div className="notification-list">
                   {notifications.map((notification) => (
-                    <div 
-                      key={notification.id} 
+                    <div
+                      key={notification.id}
                       className={`notification-item ${notification.read ? 'read' : 'unread'}`}
-                      onClick={() => handleNotificationClick(notification)}
+                      onClick={() => markAsRead(notification.id)}
                     >
-                      <div className="notification-icon" style={{ 
+                      <div className="notification-icon" style={{
                         backgroundColor: `${getPriorityColor(notification.priority)}20`,
                         color: getPriorityColor(notification.priority)
                       }}>
                         {getNotificationIcon(notification.type)}
                       </div>
                       <div className="notification-content">
-                        <div className="notification-header">
-                          <h3 className="notification-title">{notification.title}</h3>
-                          <span className="notification-time">{notification.time}</span>
-                        </div>
+                        <h3 className="notification-title">{notification.title}</h3>
                         <p className="notification-message">{notification.message}</p>
-                        <div className="notification-tags">
-                          <span className="notification-tag" style={{ 
-                            backgroundColor: getPriorityColor(notification.priority),
-                            color: 'white'
-                          }}>
-                            {notification.priority.charAt(0).toUpperCase() + notification.priority.slice(1)}
-                          </span>
-                          <span className="notification-tag">
-                            {notification.category?.charAt(0).toUpperCase() + notification.category?.slice(1)}
-                          </span>
-                          {notification.data?.noiseLevel && (
-                            <span className="notification-tag noise-level-tag">
-                              {notification.data.noiseLevel.toUpperCase()}
-                            </span>
-                          )}
-                        </div>
+                        <span className="notification-time">{notification.time}</span>
                       </div>
-                      {!notification.read && (
-                        <div className="notification-unread-indicator"></div>
-                      )}
                     </div>
                   ))}
                 </div>
@@ -1099,40 +845,27 @@ const AdminDashboard = () => {
                 <div className="no-notifications">
                   <span className="material-icons large">notifications_off</span>
                   <h3>No notifications</h3>
-                  <p>You're all caught up! Check back later for updates.</p>
                 </div>
               )}
             </div>
-            
             <div className="notification-modal-footer">
               <div className="notification-stats">
-                <span className="stat-item">
-                  <span className="stat-number">{unreadNotifications}</span>
-                  <span className="stat-label">Unread</span>
-                </span>
+                <span className="stat-number">{unreadNotifications}</span>
+                <span className="stat-label">Unread</span>
                 <span className="stat-divider">•</span>
-                <span className="stat-item">
-                  <span className="stat-number">{notifications.length}</span>
-                  <span className="stat-label">Total</span>
-                </span>
-                <span className="stat-divider">•</span>
-                <span className="stat-item">
-                  <span className="stat-number">
-                    {notifications.filter(n => n.category === 'report').length}
-                  </span>
-                  <span className="stat-label">Reports</span>
-                </span>
+                <span className="stat-number">{notifications.length}</span>
+                <span className="stat-label">Total</span>
               </div>
-              <button 
-                className="notification-close-footer-btn"
-                onClick={() => setNotificationModalVisible(false)}
-              >
+              <button onClick={() => setNotificationModalVisible(false)} className="notification-close-footer-btn">
                 Close
               </button>
             </div>
           </div>
         </div>
       )}
+
+      {/* Activity Modal */}
+      {activityModalVisible && renderActivityModal()}
 
       {/* Custom Drawer */}
       {drawerVisible && (

@@ -553,7 +553,7 @@ const UserManagement = ({ setShowUserModal }) => {
               <div className="header-title">User Management</div>
               <div className="header-subtitle">
                 Total Users: {users.length} | Showing: {filteredUsers.length}
-                {error && <span style={{color: 'red', marginLeft: '10px'}}>(Connection Error)</span>}
+                {error && <span style={{color: 'red', marginLeft: '50px', marginRight: '30px'}}>(Connection Error)</span>}
               </div>
             </div>
             <div className="header-right">

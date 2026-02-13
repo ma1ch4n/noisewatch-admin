@@ -8,7 +8,14 @@ const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
 const CustomDrawer = ({ onClose }) => {
   const [profileData, setProfileData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [statsLoading, setStatsLoading] = useState(false);
   const [userType, setUserType] = useState('user');
+  const [stats, setStats] = useState({
+    reports: 0,
+    users: 0,
+    hours: 0,
+    avgDb: 0
+  });
   const navigate = useNavigate();
 
   // Regular user menu items for noise monitoring
@@ -83,6 +90,8 @@ const CustomDrawer = ({ onClose }) => {
       
       // Update localStorage with fresh data
       localStorage.setItem('userData', JSON.stringify(userData));
+      localStorage.setItem('userId', userData.id || userData._id);
+      localStorage.setItem('userType', userData.userType || userData.role || 'user');
       
     } catch (error) {
       console.error('Profile fetch error:', error);
@@ -119,16 +128,84 @@ const CustomDrawer = ({ onClose }) => {
     setUserType('user');
   };
 
+  // Fetch admin stats (total reports, total users)
   const fetchAdminStats = async () => {
     try {
-      const token = localStorage.getItem('userToken');
-      if (!token || (userType !== 'admin' && userType !== 'administrator')) return;
+      setStatsLoading(true);
 
-      // You can add API calls here to fetch real admin stats
-      console.log('Fetching admin stats...');
-      
+      // Fetch total reports
+      let totalReports = 0;
+      try {
+        const reportsResponse = await axios.get(`${API_BASE_URL}/reports/total-reports`);
+        totalReports = reportsResponse.data.totalReports || 0;
+        console.log('Total reports:', totalReports);
+      } catch (error) {
+        console.error('Error fetching total reports:', error);
+      }
+
+      // Fetch total users
+      let totalUsers = 0;
+      try {
+        const usersResponse = await axios.get(`${API_BASE_URL}/user/getAll`);
+        if (usersResponse.data.success) {
+          totalUsers = usersResponse.data.users.length;
+          console.log('Total users:', totalUsers);
+        }
+      } catch (error) {
+        console.error('Error fetching total users:', error);
+      }
+
+      setStats({
+        reports: totalReports,
+        users: totalUsers,
+        hours: 0,
+        avgDb: 0
+      });
+
     } catch (error) {
       console.error('Error fetching admin stats:', error);
+    } finally {
+      setStatsLoading(false);
+    }
+  };
+
+  // Fetch user stats (user's reports only)
+  const fetchUserStats = async () => {
+    try {
+      setStatsLoading(true);
+      const userId = profileData?.id || profileData?._id || localStorage.getItem('userId');
+
+      if (!userId) {
+        console.log('No user ID found');
+        setStatsLoading(false);
+        return;
+      }
+
+      console.log('Fetching user stats for ID:', userId);
+
+      // Fetch user's reports only
+      let reportsCount = 0;
+      try {
+        const reportsResponse = await axios.get(`${API_BASE_URL}/reports/get-user-report/${userId}`);
+        if (reportsResponse.data.reports) {
+          reportsCount = reportsResponse.data.count || reportsResponse.data.reports.length;
+          console.log('User reports count:', reportsCount);
+        }
+      } catch (error) {
+        console.error('Error fetching user reports:', error);
+      }
+
+      setStats({
+        reports: reportsCount,
+        users: 0,
+        hours: 0,
+        avgDb: 0
+      });
+
+    } catch (error) {
+      console.error('Error fetching user stats:', error);
+    } finally {
+      setStatsLoading(false);
     }
   };
 
@@ -137,8 +214,13 @@ const CustomDrawer = ({ onClose }) => {
   }, []);
 
   useEffect(() => {
-    if (profileData && (userType === 'admin' || userType === 'administrator')) {
-      fetchAdminStats();
+    if (profileData) {
+      const isAdmin = userType.toLowerCase() === 'admin' || userType.toLowerCase() === 'administrator';
+      if (isAdmin) {
+        fetchAdminStats();
+      } else {
+        fetchUserStats();
+      }
     }
   }, [profileData, userType]);
 
@@ -175,6 +257,7 @@ const CustomDrawer = ({ onClose }) => {
       localStorage.removeItem('isAuthenticated');
       localStorage.removeItem('userId');
       localStorage.removeItem('userType');
+      localStorage.removeItem('adminName');
 
       // Show logout message
       alert('You have been successfully logged out');
@@ -256,20 +339,19 @@ const CustomDrawer = ({ onClose }) => {
   };
 
   const getStats = () => {
-    switch(userType.toLowerCase()) {
-      case 'admin':
-      case 'administrator':
-        return [
-          { number: '1,247', label: 'Reports' },
-          { number: '89', label: 'Users' },
-          { number: '23', label: 'Hotspots' }
-        ];
-      default:
-        return [
-          { number: '42', label: 'Reports' },
-          { number: '158', label: 'Hours' },
-          { number: '73', label: 'dB Avg' }
-        ];
+    const isAdmin = userType.toLowerCase() === 'admin' || userType.toLowerCase() === 'administrator';
+    
+    if (isAdmin) {
+      // Admin sees: Reports and Users only
+      return [
+        { number: stats.reports.toLocaleString(), label: 'Reports', icon: 'description' },
+        { number: stats.users.toLocaleString(), label: 'Users', icon: 'people' }
+      ];
+    } else {
+      // Regular user sees: Reports only
+      return [
+        { number: stats.reports.toString(), label: 'My Reports', icon: 'description' }
+      ];
     }
   };
 
@@ -277,7 +359,7 @@ const CustomDrawer = ({ onClose }) => {
   const currentBottomItems = getBottomItems();
   const sectionTitle = getSectionTitle();
   const gradientColors = getGradientColors();
-  const stats = getStats();
+  const displayStats = getStats();
 
   return (
     <div className="drawer-container">
@@ -298,7 +380,7 @@ const CustomDrawer = ({ onClose }) => {
 
           <button 
             className="profile-section"
-            onClick={() => handleNavigation('/admin/profile')}
+            onClick={() => handleNavigation(userType.toLowerCase() === 'admin' ? '/admin/profile' : '/profile')}
           >
             <img
               src={user.profilePhoto || '/default-profile.png'}
@@ -320,17 +402,28 @@ const CustomDrawer = ({ onClose }) => {
             <span className="material-icons profile-chevron">chevron_right</span>
           </button>
 
-          {/* Stats Container */}
+          {/* Stats Container with loading state - SIMPLIFIED */}
           <div className="stats-container">
-            {stats.map((stat, index) => (
-              <React.Fragment key={index}>
-                <div className="stat-item">
-                  <div className="stat-number">{stat.number}</div>
-                  <div className="stat-label">{stat.label}</div>
-                </div>
-                {index < stats.length - 1 && <div className="stat-divider" />}
-              </React.Fragment>
-            ))}
+            {statsLoading ? (
+              <div className="stats-loading">
+                <div className="loading-spinner small"></div>
+                <span>Loading stats...</span>
+              </div>
+            ) : (
+              <div className="stats-grid">
+                {displayStats.map((stat, index) => (
+                  <div key={index} className="stat-item">
+                    <div className="stat-icon">
+                      <span className="material-icons">{stat.icon}</span>
+                    </div>
+                    <div className="stat-content">
+                      <div className="stat-number">{stat.number || '0'}</div>
+                      <div className="stat-label">{stat.label}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 
@@ -348,28 +441,28 @@ const CustomDrawer = ({ onClose }) => {
               <div className="quick-actions-grid">
                 <button 
                   className="quick-action-button"
-                  onClick={() => handleNavigation('/quick-record')}
+                  onClick={() => handleNavigation('/report')}
                 >
                   <span className="material-icons">mic</span>
                   <span className="quick-action-text">Quick Record</span>
                 </button>
                 <button 
                   className="quick-action-button emergency-button"
-                  onClick={() => handleNavigation('/emergency')}
+                  onClick={() => handleNavigation('/report?emergency=true')}
                 >
                   <span className="material-icons">warning</span>
                   <span className="quick-action-text">Emergency</span>
                 </button>
                 <button 
                   className="quick-action-button"
-                  onClick={() => handleNavigation('/nearby')}
+                  onClick={() => handleNavigation('/map')}
                 >
                   <span className="material-icons">location_on</span>
                   <span className="quick-action-text">Nearby</span>
                 </button>
                 <button 
                   className="quick-action-button"
-                  onClick={() => handleNavigation('/stats')}
+                  onClick={() => handleNavigation('/analytics')}
                 >
                   <span className="material-icons">insert_chart</span>
                   <span className="quick-action-text">My Stats</span>
@@ -385,28 +478,28 @@ const CustomDrawer = ({ onClose }) => {
               <div className="quick-actions-grid">
                 <button 
                   className="quick-action-button"
-                  onClick={() => handleNavigation('/admin/monitoring')}
+                  onClick={() => handleNavigation('/admin/analytics')}
                 >
                   <span className="material-icons">monitor_heart</span>
                   <span className="quick-action-text">Live Monitor</span>
                 </button>
                 <button 
                   className="quick-action-button emergency-button"
-                  onClick={() => handleNavigation('/admin/alerts')}
+                  onClick={() => handleNavigation('/admin/notifications')}
                 >
                   <span className="material-icons">warning</span>
                   <span className="quick-action-text">System Alerts</span>
                 </button>
                 <button 
                   className="quick-action-button"
-                  onClick={() => handleNavigation('/admin/generate-report')}
+                  onClick={() => handleNavigation('/admin/export')}
                 >
                   <span className="material-icons">description</span>
                   <span className="quick-action-text">Generate Report</span>
                 </button>
                 <button 
                   className="quick-action-button"
-                  onClick={() => handleNavigation('/admin/thresholds')}
+                  onClick={() => handleNavigation('/admin/settings')}
                 >
                   <span className="material-icons">tune</span>
                   <span className="quick-action-text">Thresholds</span>

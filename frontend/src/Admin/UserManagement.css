@@ -687,7 +687,7 @@
 }
 
 .badge-purple {
-  background: linear-gradient(135deg, #E9D5FF, #D8B4FE);
+  background: linear-gradient(135deg, #010002, #340c60);
   border-color: #9333EA;
   color: #6B21A8;
 }
@@ -699,19 +699,19 @@
 }
 
 .badge-gray {
-  background: linear-gradient(135deg, #F3F4F6, #E5E7EB);
+  background: linear-gradient(135deg, #3b5e02, #05793f);
   border-color: #9CA3AF;
   color: #4B5563;
 }
 
 .badge-green {
-  background: linear-gradient(135deg, #D1FAE5, #A7F3D0);
+  background: linear-gradient(135deg, #0a4a03, #046618);
   border-color: #10B981;
   color: #065F46;
 }
 
 .badge-orange {
-  background: linear-gradient(135deg, #FED7AA, #FDBA74);
+  background: linear-gradient(135deg, #440101, #fd7474);
   border-color: #F97316;
   color: #9A3412;
 }
