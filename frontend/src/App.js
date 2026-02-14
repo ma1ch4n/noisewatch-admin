@@ -8,6 +8,7 @@ import NoiseReports from './Admin/NoiseReports';
 import CustomDrawer from './Admin/CustomDrawer';
 import Analytics from './Admin/Analytics';
 import Profile from './Admin/Profile';
+import Notification from './Admin/Notification';
 import './App.css';
 
 function App() {
@@ -24,6 +25,7 @@ function App() {
           <Route path="/admin/drawer" element={<CustomDrawer />} />
           <Route path="/admin/analytics" element={<Analytics />} />
           <Route path="/admin/profile" element={<Profile />} />
+          <Route path="/admin/notification" element={<Notification />} />
         </Routes>
       </div>
     </Router>

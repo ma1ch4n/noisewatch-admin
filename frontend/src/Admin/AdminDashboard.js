@@ -231,8 +231,13 @@ const AdminDashboard = () => {
   // ========== CREATE CHARTS ==========
   useEffect(() => {
     if (!loading && dashboardData) {
-      destroyAllCharts();
-      setTimeout(() => createCharts(), 200);
+      // Small delay to ensure DOM is ready
+      const timer = setTimeout(() => {
+        destroyAllCharts();
+        createCharts();
+      }, 200);
+      
+      return () => clearTimeout(timer);
     }
   }, [loading, dashboardData]);
 
@@ -243,27 +248,95 @@ const AdminDashboard = () => {
     if (noiseCategoryChart) noiseCategoryChart.destroy();
   };
 
+  const drawEmptyChart = (canvas, message = 'No reports available for this period') => {
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const width = canvas.width || 400;
+    const height = canvas.height || 250;
+    
+    ctx.clearRect(0, 0, width, height);
+    
+    // Draw a subtle background
+    ctx.fillStyle = '#FDF5E6';
+    ctx.fillRect(0, 0, width, height);
+    
+    // Draw a dashed circle for visual interest
+    ctx.beginPath();
+    ctx.arc(width / 2, height / 2 - 20, 60, 0, 2 * Math.PI);
+    ctx.strokeStyle = '#D4B48C';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([5, 5]);
+    ctx.stroke();
+    ctx.setLineDash([]); // Reset
+    
+    // Draw icon
+    ctx.font = '48px "Material Icons"';
+    ctx.fillStyle = '#D4B48C';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('📊', width / 2, height / 2 - 20);
+    
+    // Draw message
+    ctx.font = 'bold 16px "Inter", sans-serif';
+    ctx.fillStyle = '#8B7355';
+    ctx.fillText('No Reports Yet', width / 2, height / 2 + 30);
+    
+    // Draw sub-message
+    ctx.font = '13px "Inter", sans-serif';
+    ctx.fillStyle = '#A39587';
+    ctx.fillText(message, width / 2, height / 2 + 55);
+    
+    // Draw a small decorative element
+    ctx.beginPath();
+    ctx.moveTo(width / 2 - 40, height - 30);
+    ctx.lineTo(width / 2 + 40, height - 30);
+    ctx.strokeStyle = '#D4B48C';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  };
+
   const createCharts = () => {
     if (!dashboardData) return;
     
     const { reportStats } = dashboardData;
     const totalReports = reportStats?.totalReports || 0;
 
-    // 1. Noise Level Chart (Doughnut)
-    if (noiseLevelChartRef.current && reportStats?.noiseLevels) {
+    // 1. Noise Level Chart (Doughnut) - FIXED COLOR MAPPING
+    if (noiseLevelChartRef.current) {
       const ctx = noiseLevelChartRef.current.getContext('2d');
       if (noiseLevelChart) noiseLevelChart.destroy();
       
-      const hasData = reportStats.noiseLevels.some(n => n.count > 0);
+      const hasData = reportStats?.noiseLevels?.some(n => n.count > 0);
+      
       if (hasData) {
+        // Sort noise levels to ensure consistent order: red, yellow, green
+        const noiseOrder = ['red', 'yellow', 'green'];
+        const sortedNoiseLevels = [...reportStats.noiseLevels].sort((a, b) => 
+          noiseOrder.indexOf(a.level) - noiseOrder.indexOf(b.level)
+        );
+        
         const chart = new Chart(ctx, {
           type: 'doughnut',
           data: {
-            labels: ['Red (High)', 'Yellow (Medium)', 'Green (Low)'],
+            labels: sortedNoiseLevels.map(n => 
+              n.level === 'red' ? '🔴 High Noise' : 
+              n.level === 'yellow' ? '🟡 Medium Noise' : 
+              '🟢 Low Noise'
+            ),
             datasets: [{
-              data: reportStats.noiseLevels.map(n => n.count),
-              backgroundColor: ['#F44336', '#FFC107', '#4CAF50'],
-              borderWidth: 1
+              data: sortedNoiseLevels.map(n => n.count),
+              backgroundColor: sortedNoiseLevels.map(n => 
+                n.level === 'red' ? '#F44336' : 
+                n.level === 'yellow' ? '#FFC107' : 
+                '#4CAF50'
+              ),
+              borderColor: sortedNoiseLevels.map(n => 
+                n.level === 'red' ? '#D32F2F' : 
+                n.level === 'yellow' ? '#FFA000' : 
+                '#388E3C'
+              ),
+              borderWidth: 2,
+              hoverOffset: 8
             }]
           },
           options: {
@@ -271,18 +344,36 @@ const AdminDashboard = () => {
             maintainAspectRatio: false,
             cutout: '60%',
             plugins: {
-              legend: { position: 'top' },
+              legend: { 
+                position: 'top',
+                labels: {
+                  color: '#3E2C23',
+                  font: { weight: '600', size: 12, family: "'Inter', sans-serif" },
+                  usePointStyle: true,
+                  pointStyle: 'circle',
+                  padding: 15
+                }
+              },
               title: {
                 display: true,
-                text: 'Noise Level Distribution'
+                text: '🔊 Noise Level Distribution',
+                color: '#3E2C23',
+                font: { size: 14, weight: 'bold', family: "'Inter', sans-serif" },
+                padding: { top: 10, bottom: 20 }
               },
               tooltip: {
+                backgroundColor: '#3E2C23',
+                titleColor: '#FDF5E6',
+                bodyColor: '#FDF5E6',
+                titleFont: { weight: 'bold', size: 13, family: "'Inter', sans-serif" },
+                bodyFont: { size: 12, family: "'Inter', sans-serif" },
+                padding: 10,
                 callbacks: {
                   label: function(context) {
                     const label = context.label || '';
                     const value = context.raw || 0;
                     const percentage = totalReports > 0 ? Math.round((value / totalReports) * 100) : 0;
-                    return `${label}: ${value} reports (${percentage}%)`;
+                    return `${label.replace(/[🔴🟡🟢]/g, '')}: ${value} reports (${percentage}%)`;
                   }
                 }
               }
@@ -290,42 +381,87 @@ const AdminDashboard = () => {
           }
         });
         setNoiseLevelChart(chart);
+      } else {
+        // Draw empty state
+        drawEmptyChart(noiseLevelChartRef.current, 'No noise level data available');
       }
     }
 
-    // 2. Report Status Chart (Pie)
-    if (reportStatusChartRef.current && reportStats?.reportStatus) {
+    // 2. Report Status Chart (Pie) - FIXED COLOR MAPPING
+    if (reportStatusChartRef.current) {
       const ctx = reportStatusChartRef.current.getContext('2d');
       if (reportStatusChart) reportStatusChart.destroy();
       
-      const hasData = reportStats.reportStatus.some(s => s.count > 0);
+      const hasData = reportStats?.reportStatus?.some(s => s.count > 0);
+      
       if (hasData) {
+        // Sort statuses to ensure consistent order: pending, monitoring, action_required, resolved
+        const statusOrder = ['pending', 'monitoring', 'action_required', 'resolved'];
+        const sortedStatuses = [...reportStats.reportStatus].sort((a, b) => 
+          statusOrder.indexOf(a.status) - statusOrder.indexOf(b.status)
+        );
+        
         const chart = new Chart(ctx, {
           type: 'pie',
           data: {
-            labels: ['Pending', 'Monitoring', 'Action Required', 'Resolved'],
+            labels: sortedStatuses.map(s => 
+              s.status === 'pending' ? '⏳ Pending' :
+              s.status === 'monitoring' ? '👀 Monitoring' :
+              s.status === 'action_required' ? '⚠️ Action Required' :
+              '✅ Resolved'
+            ),
             datasets: [{
-              data: reportStats.reportStatus.map(s => s.count),
-              backgroundColor: ['#FF9800', '#2196F3', '#F44336', '#4CAF50'],
-              borderWidth: 1
+              data: sortedStatuses.map(s => s.count),
+              backgroundColor: sortedStatuses.map(s => 
+                s.status === 'pending' ? '#FF9800' :
+                s.status === 'monitoring' ? '#2196F3' :
+                s.status === 'action_required' ? '#F44336' :
+                '#4CAF50'
+              ),
+              borderColor: sortedStatuses.map(s => 
+                s.status === 'pending' ? '#F57C00' :
+                s.status === 'monitoring' ? '#1976D2' :
+                s.status === 'action_required' ? '#D32F2F' :
+                '#388E3C'
+              ),
+              borderWidth: 2,
+              hoverOffset: 8
             }]
           },
           options: {
             responsive: true,
             maintainAspectRatio: false,
             plugins: {
-              legend: { position: 'top' },
+              legend: { 
+                position: 'top',
+                labels: {
+                  color: '#3E2C23',
+                  font: { weight: '600', size: 12, family: "'Inter', sans-serif" },
+                  usePointStyle: true,
+                  pointStyle: 'circle',
+                  padding: 15
+                }
+              },
               title: {
                 display: true,
-                text: 'Report Status'
+                text: '📋 Report Status',
+                color: '#3E2C23',
+                font: { size: 14, weight: 'bold', family: "'Inter', sans-serif" },
+                padding: { top: 10, bottom: 20 }
               },
               tooltip: {
+                backgroundColor: '#3E2C23',
+                titleColor: '#FDF5E6',
+                bodyColor: '#FDF5E6',
+                titleFont: { weight: 'bold', size: 13, family: "'Inter', sans-serif" },
+                bodyFont: { size: 12, family: "'Inter', sans-serif" },
+                padding: 10,
                 callbacks: {
                   label: function(context) {
                     const label = context.label || '';
                     const value = context.raw || 0;
                     const percentage = totalReports > 0 ? Math.round((value / totalReports) * 100) : 0;
-                    return `${label}: ${value} reports (${percentage}%)`;
+                    return `${label.replace(/[⏳👀⚠️✅]/g, '')}: ${value} reports (${percentage}%)`;
                   }
                 }
               }
@@ -333,16 +469,26 @@ const AdminDashboard = () => {
           }
         });
         setReportStatusChart(chart);
+      } else {
+        // Draw empty state
+        drawEmptyChart(reportStatusChartRef.current, 'No report status data available');
       }
     }
 
-    // 3. Daily Reports Chart (Bar)
-    if (dailyReportsChartRef.current && reportStats?.reportTrend) {
+    // 3. Daily Reports Chart (Bar) - With data labels on bars
+    if (dailyReportsChartRef.current) {
       const ctx = dailyReportsChartRef.current.getContext('2d');
       if (dailyReportsChart) dailyReportsChart.destroy();
       
-      const hasData = reportStats.reportTrend.some(v => v > 0);
+      const hasData = reportStats?.reportTrend?.some(v => v > 0);
+      
       if (hasData) {
+        // Create gradient
+        const gradient = ctx.createLinearGradient(0, 0, 0, 400);
+        gradient.addColorStop(0, '#D35400');
+        gradient.addColorStop(0.5, '#E67E22');
+        gradient.addColorStop(1, '#F39C12');
+        
         const chart = new Chart(ctx, {
           type: 'bar',
           data: {
@@ -350,9 +496,12 @@ const AdminDashboard = () => {
             datasets: [{
               label: 'Reports',
               data: reportStats.reportTrend,
-              backgroundColor: 'rgba(211, 84, 0, 0.7)',
+              backgroundColor: gradient,
               borderColor: '#D35400',
-              borderWidth: 1
+              borderWidth: 1,
+              borderRadius: 6,
+              barPercentage: 0.7,
+              categoryPercentage: 0.8,
             }]
           },
           options: {
@@ -362,50 +511,211 @@ const AdminDashboard = () => {
               legend: { display: false },
               title: {
                 display: true,
-                text: `${selectedPeriod === 'daily' ? 'Hourly' : 'Daily'} Reports`
+                text: `${selectedPeriod === 'daily' ? '⏰ Hourly Reports' : '📅 Daily Reports'}`,
+                color: '#3E2C23',
+                font: { size: 14, weight: 'bold', family: "'Inter', sans-serif" },
+                padding: { top: 10, bottom: 20 }
+              },
+              tooltip: {
+                backgroundColor: '#3E2C23',
+                titleColor: '#FDF5E6',
+                bodyColor: '#FDF5E6',
+                titleFont: { weight: 'bold', size: 13, family: "'Inter', sans-serif" },
+                bodyFont: { size: 12, family: "'Inter', sans-serif" },
+                padding: 10,
+                callbacks: {
+                  label: function(context) {
+                    const value = context.raw || 0;
+                    return `📊 Reports: ${value}`;
+                  }
+                }
               }
             },
             scales: {
-              y: { beginAtZero: true, ticks: { stepSize: 1, precision: 0 } }
+              y: { 
+                beginAtZero: true, 
+                ticks: { 
+                  stepSize: 1, 
+                  precision: 0, 
+                  color: '#5D4A36',
+                  font: { family: "'Inter', sans-serif", size: 11 },
+                  callback: function(value) {
+                    return value;
+                  }
+                },
+                grid: { color: 'rgba(93, 74, 54, 0.1)' },
+                title: {
+                  display: true,
+                  text: 'Number of Reports',
+                  color: '#5D4A36',
+                  font: { family: "'Inter', sans-serif", size: 12, weight: '500' }
+                }
+              },
+              x: { 
+                ticks: { 
+                  color: '#5D4A36',
+                  font: { family: "'Inter', sans-serif", size: 11, weight: '500' },
+                  maxRotation: 45,
+                  minRotation: 45
+                },
+                grid: { display: false },
+                title: {
+                  display: true,
+                  text: selectedPeriod === 'daily' ? 'Hour of Day' : 'Day',
+                  color: '#5D4A36',
+                  font: { family: "'Inter', sans-serif", size: 12, weight: '500' }
+                }
+              }
             }
           }
         });
         setDailyReportsChart(chart);
+        
+        // Add custom data labels after chart is drawn
+        setTimeout(() => {
+          const chartInstance = chart;
+          const meta = chartInstance.getDatasetMeta(0);
+          if (meta && meta.data) {
+            meta.data.forEach((bar, index) => {
+              const value = reportStats.reportTrend[index];
+              if (value > 0) {
+                const { x, y } = bar.tooltipPosition();
+                ctx.font = 'bold 11px "Inter", sans-serif';
+                ctx.fillStyle = '#3E2C23';
+                ctx.textAlign = 'center';
+                ctx.fillText(value, x, y - 8);
+              }
+            });
+          }
+        }, 100);
+      } else {
+        // Draw empty state
+        drawEmptyChart(dailyReportsChartRef.current, 'No reports in this period');
       }
     }
 
-    // 4. Noise Category Chart (Bar)
-    if (noiseCategoryChartRef.current && noiseCategories.length > 0) {
+    // 4. Noise Category Chart (Bar) - With data labels on bars
+    if (noiseCategoryChartRef.current) {
       const ctx = noiseCategoryChartRef.current.getContext('2d');
       if (noiseCategoryChart) noiseCategoryChart.destroy();
       
-      const chart = new Chart(ctx, {
-        type: 'bar',
-        data: {
-          labels: noiseCategories.slice(0, 5).map(c => c.name),
-          datasets: [{
-            label: 'Reports',
-            data: noiseCategories.slice(0, 5).map(c => c.count),
-            backgroundColor: noiseCategories.slice(0, 5).map(c => c.color || '#D35400'),
-            borderWidth: 1
-          }]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: {
-            legend: { display: false },
-            title: {
-              display: true,
-              text: 'Top Noise Categories'
-            }
+      const hasData = noiseCategories.length > 0;
+      
+      if (hasData) {
+        // Generate unique colors for each category
+        const colors = [
+          '#DAA520', // Music - Gold
+          '#8B4513', // Vehicle - Brown
+          '#B8860B', // Construction - Dark Golden
+          '#8B7355', // Shouting - Light Brown
+          '#CD853F', // Party - Peru
+          '#D2B48C', // Animal - Tan
+          '#654321', // Industrial - Dark Brown
+          '#A0522D'  // Machinery - Sienna
+        ];
+        
+        const chart = new Chart(ctx, {
+          type: 'bar',
+          data: {
+            labels: noiseCategories.slice(0, 5).map(c => c.name),
+            datasets: [{
+              label: 'Number of Reports',
+              data: noiseCategories.slice(0, 5).map(c => c.count),
+              backgroundColor: colors.slice(0, 5),
+              borderColor: colors.slice(0, 5).map(c => c),
+              borderWidth: 1,
+              borderRadius: 6,
+              barPercentage: 0.6,
+            }]
           },
-          scales: {
-            y: { beginAtZero: true, ticks: { stepSize: 1, precision: 0 } }
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { display: false },
+              title: {
+                display: true,
+                text: '🏷️ Top Noise Categories',
+                color: '#3E2C23',
+                font: { size: 14, weight: 'bold', family: "'Inter', sans-serif" },
+                padding: { top: 10, bottom: 20 }
+              },
+              tooltip: {
+                backgroundColor: '#3E2C23',
+                titleColor: '#FDF5E6',
+                bodyColor: '#FDF5E6',
+                titleFont: { weight: 'bold', size: 13, family: "'Inter', sans-serif" },
+                bodyFont: { size: 12, family: "'Inter', sans-serif" },
+                padding: 10,
+                callbacks: {
+                  label: function(context) {
+                    const value = context.raw || 0;
+                    return `📊 Reports: ${value}`;
+                  }
+                }
+              }
+            },
+            scales: {
+              y: { 
+                beginAtZero: true, 
+                ticks: { 
+                  stepSize: 1, 
+                  precision: 0, 
+                  color: '#5D4A36',
+                  font: { family: "'Inter', sans-serif", size: 11 },
+                  callback: function(value) {
+                    return value;
+                  }
+                },
+                grid: { color: 'rgba(93, 74, 54, 0.1)' },
+                title: {
+                  display: true,
+                  text: 'Number of Reports',
+                  color: '#5D4A36',
+                  font: { family: "'Inter', sans-serif", size: 12, weight: '500' }
+                }
+              },
+              x: { 
+                ticks: { 
+                  color: '#5D4A36',
+                  font: { family: "'Inter', sans-serif", size: 11, weight: '500' },
+                  maxRotation: 45,
+                  minRotation: 45
+                },
+                grid: { display: false },
+                title: {
+                  display: true,
+                  text: 'Category',
+                  color: '#5D4A36',
+                  font: { family: "'Inter', sans-serif", size: 12, weight: '500' }
+                }
+              }
+            }
           }
-        }
-      });
-      setNoiseCategoryChart(chart);
+        });
+        setNoiseCategoryChart(chart);
+        
+        // Add custom data labels after chart is drawn
+        setTimeout(() => {
+          const chartInstance = chart;
+          const meta = chartInstance.getDatasetMeta(0);
+          if (meta && meta.data) {
+            meta.data.forEach((bar, index) => {
+              const value = noiseCategories[index].count;
+              if (value > 0) {
+                const { x, y } = bar.tooltipPosition();
+                ctx.font = 'bold 11px "Inter", sans-serif';
+                ctx.fillStyle = '#3E2C23';
+                ctx.textAlign = 'center';
+                ctx.fillText(value, x, y - 8);
+              }
+            });
+          }
+        }, 100);
+      } else {
+        // Draw empty state
+        drawEmptyChart(noiseCategoryChartRef.current, 'No category data available');
+      }
     }
   };
 
@@ -515,8 +825,9 @@ const AdminDashboard = () => {
         ))
       ) : (
         <div className="no-activity">
-          <span className="material-icons">info</span>
-          <div>No recent activity</div>
+          <span className="material-icons" style={{ fontSize: '48px', color: '#D4B48C' }}>info</span>
+          <h3 style={{ color: '#8B7355', margin: '10px 0', fontWeight: 600 }}>No Recent Activity</h3>
+          <p style={{ color: '#A39587' }}>Activities will appear here when users submit reports or register</p>
         </div>
       )}
     </div>
@@ -554,8 +865,9 @@ const AdminDashboard = () => {
             </div>
           ) : (
             <div className="no-notifications">
-              <span className="material-icons large">list_alt</span>
-              <h3>No activity found</h3>
+              <span className="material-icons large" style={{ fontSize: '64px', color: '#D4B48C' }}>list_alt</span>
+              <h3 style={{ color: '#8B7355' }}>No Activity Found</h3>
+              <p style={{ color: '#A39587' }}>There are no activity records to display.</p>
             </div>
           )}
         </div>
@@ -712,67 +1024,59 @@ const AdminDashboard = () => {
           <div className="charts-section">
             <div className="charts-grid">
               {/* Noise Level Distribution Chart */}
-              {dashboardData.reportStats?.noiseLevels && (
-                <div className="chart-card">
-                  <div className="chart-header">
-                    <div className="chart-title">
-                      <span className="material-icons">volume_up</span>
-                      Noise Level Distribution
-                    </div>
-                  </div>
-                  <div className="chart-container">
-                    <canvas ref={noiseLevelChartRef} />
+              <div className="chart-card">
+                <div className="chart-header">
+                  <div className="chart-title">
+                    <span className="material-icons">volume_up</span>
+                    Noise Level Distribution
                   </div>
                 </div>
-              )}
+                <div className="chart-container">
+                  <canvas ref={noiseLevelChartRef} />
+                </div>
+              </div>
 
               {/* Report Status Chart */}
-              {dashboardData.reportStats?.reportStatus && (
-                <div className="chart-card">
-                  <div className="chart-header">
-                    <div className="chart-title">
-                      <span className="material-icons">assignment</span>
-                      Report Status
-                    </div>
-                  </div>
-                  <div className="chart-container">
-                    <canvas ref={reportStatusChartRef} />
+              <div className="chart-card">
+                <div className="chart-header">
+                  <div className="chart-title">
+                    <span className="material-icons">assignment</span>
+                    Report Status
                   </div>
                 </div>
-              )}
+                <div className="chart-container">
+                  <canvas ref={reportStatusChartRef} />
+                </div>
+              </div>
 
               {/* Daily Reports Chart */}
-              {dashboardData.reportStats?.reportTrend && (
-                <div className="chart-card">
-                  <div className="chart-header">
-                    <div className="chart-title">
-                      <span className="material-icons">bar_chart</span>
-                      {selectedPeriod === 'daily' ? 'Hourly Reports' : 'Daily Reports'}
-                    </div>
-                  </div>
-                  <div className="chart-container">
-                    <canvas ref={dailyReportsChartRef} />
+              <div className="chart-card">
+                <div className="chart-header">
+                  <div className="chart-title">
+                    <span className="material-icons">bar_chart</span>
+                    {selectedPeriod === 'daily' ? 'Hourly Reports' : 'Daily Reports'}
                   </div>
                 </div>
-              )}
+                <div className="chart-container">
+                  <canvas ref={dailyReportsChartRef} />
+                </div>
+              </div>
 
               {/* Noise Category Chart */}
-              {noiseCategories.length > 0 && (
-                <div className="chart-card">
-                  <div className="chart-header">
-                    <div className="chart-title">
-                      <span className="material-icons">category</span>
-                      Top Noise Categories
-                    </div>
-                  </div>
-                  <div className="chart-container">
-                    <canvas ref={noiseCategoryChartRef} />
-                  </div>
-                  <div className="chart-stats">
-                    {renderNoiseCategoryStats()}
+              <div className="chart-card">
+                <div className="chart-header">
+                  <div className="chart-title">
+                    <span className="material-icons">category</span>
+                    Top Noise Categories
                   </div>
                 </div>
-              )}
+                <div className="chart-container">
+                  <canvas ref={noiseCategoryChartRef} />
+                </div>
+                <div className="chart-stats">
+                  {renderNoiseCategoryStats()}
+                </div>
+              </div>
             </div>
           </div>
 
@@ -843,8 +1147,9 @@ const AdminDashboard = () => {
                 </div>
               ) : (
                 <div className="no-notifications">
-                  <span className="material-icons large">notifications_off</span>
-                  <h3>No notifications</h3>
+                  <span className="material-icons large" style={{ fontSize: '64px', color: '#D4B48C' }}>notifications_off</span>
+                  <h3 style={{ color: '#8B7355' }}>No notifications</h3>
+                  <p style={{ color: '#A39587' }}>You're all caught up!</p>
                 </div>
               )}
             </div>

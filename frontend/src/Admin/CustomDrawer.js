@@ -24,7 +24,7 @@ const CustomDrawer = ({ onClose }) => {
     { id: '2', title: 'Noise Map', icon: 'map', route: '/map' },
     { id: '3', title: 'Report Noise', icon: 'mic', route: '/report' },
     { id: '4', title: 'My History', icon: 'history', route: '/history' },
-    { id: '5', title: 'Notifications', icon: 'notifications', route: '/notifications' },
+    { id: '5', title: 'Notifications', icon: 'notifications', route: '/notification' },
     { id: '6', title: 'Analytics (Personal)', icon: 'analytics', route: '/analytics' },
   ];
 
@@ -35,7 +35,7 @@ const CustomDrawer = ({ onClose }) => {
     { id: '3', title: 'Heatmap & Analytics', icon: 'bar_chart', route: '/admin/analytics' },
     { id: '4', title: 'Users & Contributors', icon: 'people', route: '/admin/users' },
     { id: '5', title: 'Export Reports', icon: 'download', route: '/admin/export' },
-    { id: '6', title: 'Notifications & Alerts', icon: 'warning', route: '/admin/notifications' },
+    { id: '6', title: 'Notifications & Alerts', icon: 'warning', route: '/admin/notification' },
   ];
 
   const bottomItems = [
@@ -342,13 +342,13 @@ const CustomDrawer = ({ onClose }) => {
     const isAdmin = userType.toLowerCase() === 'admin' || userType.toLowerCase() === 'administrator';
     
     if (isAdmin) {
-      // Admin sees: Reports and Users only
+      // Admin sees: Reports and Users only (2 items)
       return [
         { number: stats.reports.toLocaleString(), label: 'Reports', icon: 'description' },
         { number: stats.users.toLocaleString(), label: 'Users', icon: 'people' }
       ];
     } else {
-      // Regular user sees: Reports only
+      // Regular user sees: Reports only (1 item)
       return [
         { number: stats.reports.toString(), label: 'My Reports', icon: 'description' }
       ];
@@ -402,7 +402,7 @@ const CustomDrawer = ({ onClose }) => {
             <span className="material-icons profile-chevron">chevron_right</span>
           </button>
 
-          {/* Stats Container with loading state - SIMPLIFIED */}
+          {/* Stats Container with loading state - FIXED to match CSS */}
           <div className="stats-container">
             {statsLoading ? (
               <div className="stats-loading">
@@ -410,19 +410,14 @@ const CustomDrawer = ({ onClose }) => {
                 <span>Loading stats...</span>
               </div>
             ) : (
-              <div className="stats-grid">
-                {displayStats.map((stat, index) => (
-                  <div key={index} className="stat-item">
-                    <div className="stat-icon">
-                      <span className="material-icons">{stat.icon}</span>
-                    </div>
-                    <div className="stat-content">
-                      <div className="stat-number">{stat.number || '0'}</div>
-                      <div className="stat-label">{stat.label}</div>
-                    </div>
+              displayStats.map((stat, index) => (
+                <div key={index} className="stat-item">
+                  <div className="stat-content">
+                    <div className="stat-number">{stat.number || '0'}</div>
+                    <div className="stat-label">{stat.label}</div>
                   </div>
-                ))}
-              </div>
+                </div>
+              ))
             )}
           </div>
         </div>
@@ -485,7 +480,7 @@ const CustomDrawer = ({ onClose }) => {
                 </button>
                 <button 
                   className="quick-action-button emergency-button"
-                  onClick={() => handleNavigation('/admin/notifications')}
+                  onClick={() => handleNavigation('/admin/notification')}
                 >
                   <span className="material-icons">warning</span>
                   <span className="quick-action-text">System Alerts</span>

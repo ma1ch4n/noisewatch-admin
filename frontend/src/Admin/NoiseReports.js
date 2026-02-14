@@ -5,6 +5,7 @@ import CustomDrawer from './CustomDrawer';
 const NoiseReports = ({ navigation }) => {
   const [drawerVisible, setDrawerVisible] = useState(false);
   const [reports, setReports] = useState([]);
+  const [filteredReports, setFilteredReports] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [expandedReport, setExpandedReport] = useState(null);
@@ -14,12 +15,21 @@ const NoiseReports = ({ navigation }) => {
   const [selectedStatus, setSelectedStatus] = useState(null);
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [statusModalVisible, setStatusModalVisible] = useState(false);
+  
+  // NEW: Search and filter states
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedMonth, setSelectedMonth] = useState('all');
+  const [availableMonths, setAvailableMonths] = useState([]);
+  const [showSearch, setShowSearch] = useState(false);
+  const [showMonthPicker, setShowMonthPicker] = useState(false);
+  
   const audioRef = useRef(new Audio());
   const videoRefs = useRef({});
   const [audioProgress, setAudioProgress] = useState({});
   const [audioDuration, setAudioDuration] = useState({});
   const [videoLoading, setVideoLoading] = useState({});
   const [fullscreenVideo, setFullscreenVideo] = useState(null);
+  const searchInputRef = useRef(null);
 
   // API endpoint
   const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
@@ -89,6 +99,18 @@ const NoiseReports = ({ navigation }) => {
     };
   }, []);
 
+  // Focus search input when shown
+  useEffect(() => {
+    if (showSearch && searchInputRef.current) {
+      searchInputRef.current.focus();
+    }
+  }, [showSearch]);
+
+  // Apply filters whenever search query, month filter, or reports change
+  useEffect(() => {
+    applyFilters();
+  }, [searchQuery, selectedMonth, reports, selectedFilter]);
+
   // Handle fullscreen change
   useEffect(() => {
     const handleFullscreenChange = () => {
@@ -120,7 +142,6 @@ const NoiseReports = ({ navigation }) => {
       if (response.ok) {
         const transformed = data.map(r => ({
           ...r,
-          // Cloudinary URLs are already in mediaUrl field
           audioUri: r.mediaType === 'audio' ? r.mediaUrl : null,
           videoUri: r.mediaType === 'video' ? r.mediaUrl : null,
           noiseLevel: r.noiseLevel || 'green',
@@ -129,6 +150,10 @@ const NoiseReports = ({ navigation }) => {
         }));
         
         setReports(transformed);
+        setFilteredReports(transformed);
+        
+        // Extract unique months from reports
+        extractAvailableMonths(transformed);
         
         // Log media information for debugging
         const audioReports = transformed.filter(r => r.mediaType === 'audio');
@@ -145,6 +170,160 @@ const NoiseReports = ({ navigation }) => {
     } finally {
       setLoading(false);
     }
+  };
+
+  // NEW: Extract available months from reports
+  const extractAvailableMonths = (reportsData) => {
+    const monthsMap = new Map();
+    
+    reportsData.forEach(report => {
+      if (report.createdAt) {
+        const date = new Date(report.createdAt);
+        if (!isNaN(date.getTime())) {
+          const year = date.getFullYear();
+          const month = date.getMonth();
+          const monthKey = `${year}-${String(month + 1).padStart(2, '0')}`;
+          const monthLabel = date.toLocaleDateString('en-US', { 
+            year: 'numeric', 
+            month: 'long' 
+          });
+          
+          if (!monthsMap.has(monthKey)) {
+            monthsMap.set(monthKey, {
+              key: monthKey,
+              label: monthLabel,
+              year: year,
+              month: month,
+              timestamp: date.getTime()
+            });
+          }
+        }
+      }
+    });
+
+    const monthArray = Array.from(monthsMap.values());
+    monthArray.sort((a, b) => b.timestamp - a.timestamp);
+    
+    setAvailableMonths(monthArray);
+  };
+
+  // NEW: Apply all filters (search, month, category)
+  const applyFilters = () => {
+    let filtered = [...reports];
+
+    // Apply category filter
+    if (selectedFilter !== 'All') {
+      filtered = filtered.filter(r => r.reason?.includes(selectedFilter) || r.reason === selectedFilter);
+    }
+
+    // Apply month filter
+    if (selectedMonth !== 'all') {
+      filtered = filtered.filter(report => {
+        if (!report.createdAt) return false;
+        const date = new Date(report.createdAt);
+        const year = date.getFullYear();
+        const month = date.getMonth();
+        const monthKey = `${year}-${String(month + 1).padStart(2, '0')}`;
+        return monthKey === selectedMonth;
+      });
+    }
+
+    // Apply search query
+   // Helper function to safely get string from location for searching
+const getLocationSearchString = (location) => {
+  if (!location) return '';
+  
+  // If location is a string
+  if (typeof location === 'string') return location.toLowerCase();
+  
+  // If location is an object
+  if (typeof location === 'object') {
+    const parts = [];
+    
+    // Add address if it's a string
+    if (location.address && typeof location.address === 'string') {
+      parts.push(location.address);
+    }
+    
+    // Add formattedAddress if it's a string
+    if (location.formattedAddress && typeof location.formattedAddress === 'string') {
+      parts.push(location.formattedAddress);
+    }
+    
+    // Add name if it's a string
+    if (location.name && typeof location.name === 'string') {
+      parts.push(location.name);
+    }
+    
+    // Add city if it's a string
+    if (location.city && typeof location.city === 'string') {
+      parts.push(location.city);
+    }
+    
+    // Add street if it's a string
+    if (location.street && typeof location.street === 'string') {
+      parts.push(location.street);
+    }
+    
+    // Add region if it's a string
+    if (location.region && typeof location.region === 'string') {
+      parts.push(location.region);
+    }
+    
+    return parts.join(' ').toLowerCase();
+  }
+  
+  return '';
+};
+
+// Then in your applyFilters function:
+if (searchQuery.trim() !== '') {
+  const query = searchQuery.toLowerCase().trim();
+  filtered = filtered.filter(report => {
+    // Search in reason
+    if (report.reason && report.reason.toLowerCase().includes(query)) return true;
+    
+    // Search in comment
+    if (report.comment && report.comment.toLowerCase().includes(query)) return true;
+    
+    // Search in status
+    if (report.status && report.status.toLowerCase().includes(query)) return true;
+    
+    // Search in ID
+    if (report._id && report._id.toLowerCase().includes(query)) return true;
+    
+    // Search in location using helper
+    const locationString = getLocationSearchString(report.location);
+    if (locationString.includes(query)) return true;
+    
+    return false;
+  });
+}
+
+    setFilteredReports(filtered);
+  };
+
+  // NEW: Clear search
+  const clearSearch = () => {
+    setSearchQuery('');
+    setShowSearch(false);
+  };
+
+  // NEW: Toggle month picker
+  const toggleMonthPicker = () => {
+    setShowMonthPicker(!showMonthPicker);
+    if (showSearch) setShowSearch(false);
+  };
+
+  // NEW: Select month
+  const selectMonth = (monthKey) => {
+    setSelectedMonth(monthKey);
+    setShowMonthPicker(false);
+  };
+
+  // NEW: Clear month filter
+  const clearMonthFilter = () => {
+    setSelectedMonth('all');
   };
 
   const onRefresh = async () => {
@@ -263,131 +442,131 @@ const NoiseReports = ({ navigation }) => {
   };
 
   const playAudio = async (audioUri, reportId) => {
-  try {
-    console.log('🎵 Attempting to play audio for report:', reportId);
-    console.log('🔗 Original Cloudinary URL:', audioUri);
-    
-    // If clicking the same audio that's playing, pause it
-    if (playingAudio === reportId && audioRef.current) {
-      console.log('⏸️ Pausing current audio');
-      audioRef.current.pause();
-      setPlayingAudio(null);
-      return;
-    }
-    
-    // Stop any currently playing audio
-    if (audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current.src = '';
-    }
-
-    // ✅ FIX: Ensure Cloudinary URL has .mp3 extension
-    let processedUrl = audioUri;
-    
-    // If URL doesn't end with .mp3, add it
-    if (!processedUrl.match(/\.(mp3|wav|ogg)$/i)) {
-      // For Cloudinary URLs, ensure .mp3 extension
-      processedUrl = processedUrl.replace(/(\.[^.]+)?$/, '.mp3');
-    }
-    
-    // If Cloudinary URL doesn't have /video/upload/, replace with it
-    if (processedUrl.includes('cloudinary.com') && !processedUrl.includes('/video/upload/')) {
-      processedUrl = processedUrl.replace(/\/(image|raw)\/upload\//, '/video/upload/');
-    }
-    
-    console.log('🔗 Processed URL:', processedUrl);
-
-    // Create new audio element
-    const newAudio = new Audio();
-    audioRef.current = newAudio;
-    
-    // Set up event listeners BEFORE setting src
-    newAudio.addEventListener('error', (e) => {
-      console.error('❌ Audio error event:', e);
-      console.error('Audio error code:', newAudio.error?.code);
-      console.error('Audio error message:', newAudio.error?.message);
-      console.error('Failed URL:', processedUrl);
-      
-      // Show specific error messages
-      let errorMsg = 'Could not play audio. ';
-      switch(newAudio.error?.code) {
-        case 1: errorMsg += 'Loading was aborted.'; break;
-        case 2: errorMsg += 'Network error.'; break;
-        case 3: errorMsg += 'Decoding failed.'; break;
-        case 4: errorMsg += 'Format not supported.'; break;
-        default: errorMsg += 'Unknown error.';
-      }
-      
-      alert(errorMsg + '\n\nTrying alternative format...');
-      
-      // Try alternative format
-      const altUrl = processedUrl.replace('.mp3', '.wav');
-      console.log('🔄 Trying alternative URL:', altUrl);
-      newAudio.src = altUrl;
-      
-      setPlayingAudio(null);
-    });
-
-    newAudio.addEventListener('loadedmetadata', () => {
-      console.log('✅ Audio metadata loaded, duration:', newAudio.duration);
-      setAudioDuration(prev => ({
-        ...prev,
-        [reportId]: newAudio.duration
-      }));
-    });
-
-    newAudio.addEventListener('timeupdate', () => {
-      setAudioProgress(prev => ({
-        ...prev,
-        [reportId]: newAudio.currentTime
-      }));
-    });
-
-    newAudio.addEventListener('ended', () => {
-      console.log('⏹️ Audio ended');
-      setPlayingAudio(null);
-      setAudioProgress(prev => ({
-        ...prev,
-        [reportId]: 0
-      }));
-    });
-
-    // Set audio properties
-    newAudio.crossOrigin = 'anonymous';
-    newAudio.preload = 'metadata';
-    
-    // Set the source
-    newAudio.src = processedUrl;
-    
-    console.log('🔧 Audio element setup complete, attempting to load...');
-    
-    // Load and play
     try {
-      await newAudio.load();
-      console.log('✅ Audio loaded successfully');
+      console.log('🎵 Attempting to play audio for report:', reportId);
+      console.log('🔗 Original Cloudinary URL:', audioUri);
       
-      await newAudio.play();
-      console.log('✅ Audio playing successfully');
-      setPlayingAudio(reportId);
-      
-    } catch (playError) {
-      console.error('❌ Play error:', playError);
-      
-      if (playError.name === 'NotSupportedError') {
-        alert('Audio format not supported by your browser. The file may need to be re-encoded.\n\nURL: ' + processedUrl);
-      } else if (playError.name === 'NotAllowedError') {
-        alert('Autoplay was blocked. Please click play again.');
-      } else {
-        alert('Could not play audio: ' + playError.message);
+      // If clicking the same audio that's playing, pause it
+      if (playingAudio === reportId && audioRef.current) {
+        console.log('⏸️ Pausing current audio');
+        audioRef.current.pause();
+        setPlayingAudio(null);
+        return;
       }
+      
+      // Stop any currently playing audio
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.src = '';
+      }
+
+      // ✅ FIX: Ensure Cloudinary URL has .mp3 extension
+      let processedUrl = audioUri;
+      
+      // If URL doesn't end with .mp3, add it
+      if (!processedUrl.match(/\.(mp3|wav|ogg)$/i)) {
+        // For Cloudinary URLs, ensure .mp3 extension
+        processedUrl = processedUrl.replace(/(\.[^.]+)?$/, '.mp3');
+      }
+      
+      // If Cloudinary URL doesn't have /video/upload/, replace with it
+      if (processedUrl.includes('cloudinary.com') && !processedUrl.includes('/video/upload/')) {
+        processedUrl = processedUrl.replace(/\/(image|raw)\/upload\//, '/video/upload/');
+      }
+      
+      console.log('🔗 Processed URL:', processedUrl);
+
+      // Create new audio element
+      const newAudio = new Audio();
+      audioRef.current = newAudio;
+      
+      // Set up event listeners BEFORE setting src
+      newAudio.addEventListener('error', (e) => {
+        console.error('❌ Audio error event:', e);
+        console.error('Audio error code:', newAudio.error?.code);
+        console.error('Audio error message:', newAudio.error?.message);
+        console.error('Failed URL:', processedUrl);
+        
+        // Show specific error messages
+        let errorMsg = 'Could not play audio. ';
+        switch(newAudio.error?.code) {
+          case 1: errorMsg += 'Loading was aborted.'; break;
+          case 2: errorMsg += 'Network error.'; break;
+          case 3: errorMsg += 'Decoding failed.'; break;
+          case 4: errorMsg += 'Format not supported.'; break;
+          default: errorMsg += 'Unknown error.';
+        }
+        
+        alert(errorMsg + '\n\nTrying alternative format...');
+        
+        // Try alternative format
+        const altUrl = processedUrl.replace('.mp3', '.wav');
+        console.log('🔄 Trying alternative URL:', altUrl);
+        newAudio.src = altUrl;
+        
+        setPlayingAudio(null);
+      });
+
+      newAudio.addEventListener('loadedmetadata', () => {
+        console.log('✅ Audio metadata loaded, duration:', newAudio.duration);
+        setAudioDuration(prev => ({
+          ...prev,
+          [reportId]: newAudio.duration
+        }));
+      });
+
+      newAudio.addEventListener('timeupdate', () => {
+        setAudioProgress(prev => ({
+          ...prev,
+          [reportId]: newAudio.currentTime
+        }));
+      });
+
+      newAudio.addEventListener('ended', () => {
+        console.log('⏹️ Audio ended');
+        setPlayingAudio(null);
+        setAudioProgress(prev => ({
+          ...prev,
+          [reportId]: 0
+        }));
+      });
+
+      // Set audio properties
+      newAudio.crossOrigin = 'anonymous';
+      newAudio.preload = 'metadata';
+      
+      // Set the source
+      newAudio.src = processedUrl;
+      
+      console.log('🔧 Audio element setup complete, attempting to load...');
+      
+      // Load and play
+      try {
+        await newAudio.load();
+        console.log('✅ Audio loaded successfully');
+        
+        await newAudio.play();
+        console.log('✅ Audio playing successfully');
+        setPlayingAudio(reportId);
+        
+      } catch (playError) {
+        console.error('❌ Play error:', playError);
+        
+        if (playError.name === 'NotSupportedError') {
+          alert('Audio format not supported by your browser. The file may need to be re-encoded.\n\nURL: ' + processedUrl);
+        } else if (playError.name === 'NotAllowedError') {
+          alert('Autoplay was blocked. Please click play again.');
+        } else {
+          alert('Could not play audio: ' + playError.message);
+        }
+        setPlayingAudio(null);
+      }
+    } catch (error) {
+      console.error('❌ Error in playAudio function:', error);
+      alert('Could not play audio. Please check console for details.');
       setPlayingAudio(null);
     }
-  } catch (error) {
-    console.error('❌ Error in playAudio function:', error);
-    alert('Could not play audio. Please check console for details.');
-    setPlayingAudio(null);
-  }
-};
+  };
 
   const handleAudioProgress = (reportId, value) => {
     const audio = audioRef.current;
@@ -455,11 +634,6 @@ const NoiseReports = ({ navigation }) => {
         setFullscreenVideo(null);
       }
     }
-  };
-
-  const getFilteredReports = () => {
-    if (selectedFilter === 'All') return reports;
-    return reports.filter(r => r.reason?.includes(selectedFilter) || r.reason === selectedFilter);
   };
 
   const getReasonIcon = (reason) => {
@@ -738,7 +912,13 @@ const NoiseReports = ({ navigation }) => {
   };
 
   const filters = ['All', 'Music', 'Vehicle', 'Construction', 'Party', 'Animal'];
-  const filteredReports = getFilteredReports();
+
+  // Get current month label for display
+  const getCurrentMonthLabel = () => {
+    if (selectedMonth === 'all') return 'All Months';
+    const month = availableMonths.find(m => m.key === selectedMonth);
+    return month ? month.label : 'All Months';
+  };
 
   return (
     <div className="admin-reports-container">
@@ -778,17 +958,105 @@ const NoiseReports = ({ navigation }) => {
               <button onClick={openDrawer} className="header-button">
                 <span className="material-icons">menu</span>
               </button>
-              <button onClick={onRefresh} className="header-button" disabled={refreshing}>
-                <span className="material-icons">refresh</span>
-              </button>
+              <div className="header-actions">
+                <button 
+                  onClick={() => setShowSearch(!showSearch)} 
+                  className={`header-icon-button ${showSearch ? 'active' : ''}`}
+                  title="Search reports"
+                >
+                  <span className="material-icons">search</span>
+                </button>
+                <button 
+                  onClick={toggleMonthPicker} 
+                  className={`header-icon-button ${showMonthPicker ? 'active' : ''}`}
+                  title="Filter by month"
+                >
+                  <span className="material-icons">calendar_today</span>
+                </button>
+                <button onClick={onRefresh} className="header-icon-button" disabled={refreshing}>
+                  <span className="material-icons">refresh</span>
+                </button>
+              </div>
             </div>
             <div className="header-title">📊 Noise Reports</div>
             <div className="header-subtitle">
               {filteredReports.length} {selectedFilter !== 'All' ? selectedFilter : ''} report{filteredReports.length !== 1 ? 's' : ''}
+              {selectedMonth !== 'all' && ` • ${getCurrentMonthLabel()}`}
+              {searchQuery && ` • Search: "${searchQuery}"`}
             </div>
           </div>
         </div>
       </div>
+
+      {/* Search Bar */}
+      {showSearch && (
+        <div className="search-container">
+          <div className="search-wrapper">
+            <span className="material-icons search-icon">search</span>
+            <input
+              ref={searchInputRef}
+              type="text"
+              className="search-input"
+              placeholder="Search by reason, comment, status, ID..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+            {searchQuery && (
+              <button className="search-clear" onClick={clearSearch}>
+                <span className="material-icons">close</span>
+              </button>
+            )}
+          </div>
+          <div className="search-hint">
+            {searchQuery && (
+              <span>Found {filteredReports.length} results</span>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Month Picker Dropdown */}
+      {showMonthPicker && (
+        <div className="month-picker-container">
+          <div className="month-picker-header">
+            <span className="material-icons">calendar_today</span>
+            <span>Select Month</span>
+            <button className="month-picker-close" onClick={() => setShowMonthPicker(false)}>
+              <span className="material-icons">close</span>
+            </button>
+          </div>
+          <div className="month-picker-content">
+            <button
+              className={`month-option ${selectedMonth === 'all' ? 'month-option-selected' : ''}`}
+              onClick={() => selectMonth('all')}
+            >
+              <span className="material-icons">view_list</span>
+              <span>All Months</span>
+              {selectedMonth === 'all' && <span className="material-icons check-icon">check</span>}
+            </button>
+            
+            {availableMonths.map((month) => (
+              <button
+                key={month.key}
+                className={`month-option ${selectedMonth === month.key ? 'month-option-selected' : ''}`}
+                onClick={() => selectMonth(month.key)}
+              >
+                <span className="material-icons">calendar_month</span>
+                <span>{month.label}</span>
+                {selectedMonth === month.key && <span className="material-icons check-icon">check</span>}
+              </button>
+            ))}
+          </div>
+          {selectedMonth !== 'all' && (
+            <div className="month-picker-footer">
+              <button className="clear-month-filter" onClick={clearMonthFilter}>
+                <span className="material-icons">clear</span>
+                <span>Clear Filter</span>
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Filter Pills */}
       <div className="filter-container">
@@ -819,10 +1087,26 @@ const NoiseReports = ({ navigation }) => {
             <span className="material-icons empty-icon">description</span>
             <div className="empty-text">No reports found</div>
             <div className="empty-subtext">
-              {selectedFilter !== 'All' 
+              {searchQuery 
+                ? `No results for "${searchQuery}"` 
+                : selectedMonth !== 'all'
+                ? `No reports in ${getCurrentMonthLabel()}`
+                : selectedFilter !== 'All' 
                 ? `No ${selectedFilter} reports available` 
                 : 'Reports will appear here when submitted'}
             </div>
+            {(searchQuery || selectedMonth !== 'all') && (
+              <button 
+                className="clear-all-filters"
+                onClick={() => {
+                  setSearchQuery('');
+                  setSelectedMonth('all');
+                }}
+              >
+                <span className="material-icons">refresh</span>
+                Clear All Filters
+              </button>
+            )}
           </div>
         ) : (
           <div className="reports-list-container">
